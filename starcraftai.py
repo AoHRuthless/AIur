@@ -1,3 +1,5 @@
+import random
+
 import sc2
 from sc2 import run_game, maps, Race, Difficulty
 from sc2.player import Bot, Computer
@@ -19,6 +21,7 @@ class Spark(sc2.BotAI):
         await self.expand()
         await self.construct_barracks()
         await self.train_military()
+        await self.attack()
 
     async def train_workers(self):
         """
@@ -105,6 +108,37 @@ class Spark(sc2.BotAI):
         for barrack in self.units(BARRACKS).ready.noqueue:
             if self.can_afford(MARINE) and self.supply_left > 0:
                 await self.do(barrack.train(MARINE))
+
+    async def attack(self):
+        """
+        Determines whether or not to send our marines to seek the enemy or 
+        defend the base.
+        """
+
+        marines = self.units(MARINE)
+
+        if marines.amount >= 12:
+            for marine in marines.idle:
+                await self.do(marine.attack(self.seek_target(self.state)))
+        elif marines.amount >= 3:    
+            for marine in marines.idle:
+                if len(self.known_enemy_units) == 0:
+                    break
+
+                enemy_unit = random.choice(self.known_enemy_units)
+                await(self.do(marine.attack(enemy_unit)))
+
+    def seek_target(self, state):
+        """
+        Seeks out the enemy to attack with the army. Prioritizes known units > 
+        known structures > start location
+        """
+        if len(self.known_enemy_units) > 0:
+            return random.choice(self.known_enemy_units)
+        elif len(self.known_enemy_structures) > 0:
+            return random.choice(self.known_enemy_structures)
+        else:
+            return self.enemy_start_locations[0]
 
     @property
     def num_workers(self):
