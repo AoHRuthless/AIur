@@ -23,12 +23,12 @@ class Spark(sc2.BotAI):
         asynchonrously. We cap SCVs at 15 per command center.
 
         """
-        threshold = self.num_cmd_centers * 15
+        threshold = self.num_bases * 15
 
-        for cmd_center in self.ready_cmd_centers.noqueue:
-            if self.can_afford(SCV) and self.num_workers() < self.
-            num_cmd_centers * 15:
-                await self.do(cmd_center.train(SCV))
+        for base in self.ready_bases.noqueue:
+            if self.can_afford(SCV) and self.num_workers < self.
+            num_bases * 15:
+                await self.do(base.train(SCV))
 
     async def construct_supply_depots(self):
         """
@@ -38,19 +38,20 @@ class Spark(sc2.BotAI):
         if self.supply_left() >= 3 or self.already_pending():
             return
 
-        if self.ready_cmd_centers.exists and self.can_afford(SUPPLYDEPOT):
-            await self.build(SUPPLYDEPOT, near=self.ready_cmd_centers.first)
+        if self.ready_bases.exists and self.can_afford(SUPPLYDEPOT):
+            await self.build(SUPPLYDEPOT, near=self.ready_bases.first)
 
     async def construct_refineries(self):
         """
         Constructs available refineries near constructed command centers
         """
+
         if not self.can_afford(REFINERY):
              return
 
-        for cmd_center in self.ready_cmd_centers:
+        for base in self.ready_bases:
             vespenes = self.state.vespene_geyser.closer_than(15.0, 
-                cmd_center)
+                base)
             for vespene in vespenes:
                 worker = self.select_build_worker(vespene.position)
                 if worker is None:
@@ -60,7 +61,12 @@ class Spark(sc2.BotAI):
                     await self.do(worker.build(REFINERY, vespene))
 
     async def expand(self):
-        if self.num_cmd_centers >= 3:
+        """
+        Expands now if affordable. Currently, expansion is arbitrarily 
+        limited to 3 command centers.
+        """
+
+        if self.num_bases >= 3:
             return
 
         if self.can_afford(COMMANDCENTER):
@@ -68,18 +74,30 @@ class Spark(sc2.BotAI):
 
     @property
     def num_workers(self):
-        return self.units(SCV).amount()
+        """
+        Grabs the number of scvs.
+        """
+        return self.units(SCV).amount
     
     @property
-    def num_cmd_centers(self):
-        return self.cmd_centers.amount()
+    def num_bases(self):
+        """
+        Grabs the number of command centers.
+        """
+        return self.bases.amount
 
     @property
-    def ready_cmd_centers(self):
-        return self.cmd_centers.ready
+    def ready_bases(self):
+        """
+        Grabs the number of ready command centers.
+        """
+        return self.bases.ready
 
     @property
-    def cmd_centers(self):
+    def bases(self):
+        """
+        Grabs all command center units.
+        """
         return self.units(COMMANDCENTER)
     
 
