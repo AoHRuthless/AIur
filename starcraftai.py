@@ -6,7 +6,7 @@ from sc2.player import Bot, Computer
 from sc2.constants import COMMANDCENTER, SCV, SUPPLYDEPOT, REFINERY, \
  BARRACKS, BARRACKSTECHLAB, MARINE
 
-class Spark(sc2.BotAI):
+class Prometheus(sc2.BotAI):
     async def on_step(self, iteration):
         """
         Ticking function called every iteration
@@ -133,6 +133,7 @@ class Spark(sc2.BotAI):
         Seeks out the enemy to attack with the army. Prioritizes known units > 
         known structures > start location
         """
+
         if len(self.known_enemy_units) > 0:
             return random.choice(self.known_enemy_units)
         elif len(self.known_enemy_structures) > 0:
@@ -171,5 +172,5 @@ class Spark(sc2.BotAI):
 
 
 run_game(maps.get('(2)RedshiftLE'), 
-    [Bot(Race.Terran, Spark()), Computer(Race.Protoss, Difficulty.Easy)], 
+    [Bot(Race.Terran, Prometheus()), Computer(Race.Protoss, Difficulty.Easy)], 
     realtime=True)
