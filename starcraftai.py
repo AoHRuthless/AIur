@@ -1,7 +1,8 @@
 import sc2
 from sc2 import run_game, maps, Race, Difficulty
 from sc2.player import Bot, Computer
-from sc2.constants import COMMANDCENTER, SCV, SUPPLYDEPOT, REFINERY, BARRACKS
+from sc2.constants import COMMANDCENTER, SCV, SUPPLYDEPOT, REFINERY, \
+ BARRACKS, BARRACKSTECHLAB, MARINE
 
 class Spark(sc2.BotAI):
     async def on_step(self, iteration):
@@ -16,18 +17,17 @@ class Spark(sc2.BotAI):
         await self.construct_supply_depots()
         await self.construct_refineries()
         await self.expand()
+        await self.construct_barracks()
+        await self.train_military()
 
     async def train_workers(self):
         """
         Checks each available command center and trains an SCV 
-        asynchonrously. We cap SCVs at 15 per command center.
-
+        asynchonrously.
         """
-        threshold = self.num_bases * 15
 
         for base in self.ready_bases.noqueue:
-            if self.can_afford(SCV) and self.num_workers < self.
-            num_bases * 15:
+            if self.can_afford(SCV):
                 await self.do(base.train(SCV))
 
     async def construct_supply_depots(self):
@@ -45,7 +45,6 @@ class Spark(sc2.BotAI):
         """
         Constructs available refineries near constructed command centers
         """
-
         if not self.can_afford(REFINERY):
              return
 
@@ -71,6 +70,41 @@ class Spark(sc2.BotAI):
 
         if self.can_afford(COMMANDCENTER):
             self.expand_now()
+
+    async def construct_barracks(self):
+        """
+        Builds up to two barracks and selects one to build a tech lab add-on.
+        """
+
+        if self.units(BARRACKS).ready.exists and self.units(BARRACKS).
+        amount < 2:
+            await self.upgrade_barracks()
+        elif self.can_afford(BARRACKS) and not self.already_pending(BARRACKS):
+            await self.build(BARRACKS, near=self.ready_bases.first)
+
+    async def upgrade_barracks(self):
+        """
+        Upgrades a barrack by adding a tech-lab. Reactors not supported yet.
+        """
+
+        for barrack in self.units(BARRACKS).ready:
+            if not self.units(BARRACKSTECHLAB):
+                if self.can_afford(BARRACKSTECHLAB) and not self.
+                already_pending(BARRACKSTECHLAB):
+                    await self.build(BARRACKSTECHLAB, near=barrack)
+            else:
+                break
+
+    async def train_military(self):
+        """
+        Trains our army.
+
+        Hoorah for marines!
+        """
+
+        for barrack in self.units(BARRACKS).ready.noqueue:
+            if self.can_afford(MARINE) and self.supply_left > 0:
+                await self.do(barrack.train(MARINE))
 
     @property
     def num_workers(self):
