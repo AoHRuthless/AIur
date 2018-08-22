@@ -2,6 +2,7 @@ import sc2
 from sc2 import run_game, maps, Race, Difficulty
 from sc2.player import Bot, Computer, Human
 from sc2.constants import *
+from sc2.ids.ability_id import *
 
 class TerranBot(sc2.BotAI):
     async def on_step(self, iteration):
@@ -34,12 +35,17 @@ class TerranBot(sc2.BotAI):
         """
         Constructs supply depots automatically if supply is running low
         """
+        if self.supply_cap >= 200:
+            return
 
         if self.supply_left >= 3 or self.already_pending(SUPPLYDEPOT):
             return
 
         if self.ready_bases.exists and self.can_afford(SUPPLYDEPOT):
             await self.build(SUPPLYDEPOT, near=self.ready_bases.first)
+
+        for depot in self.units(SUPPLYDEPOT).ready:
+            await self.do(depot(MORPH_SUPPLYDEPOT_LOWER))
 
     async def construct_refineries(self):
         """
@@ -94,10 +100,13 @@ class TerranBot(sc2.BotAI):
             return
 
         first_rax = ready_rax.first
-        if not first_rax.has_add_on and first_rax.noqueue:
+        if not first_rax.has_add_on and first_rax.noqueue \
+        and self.can_afford(BARRACKSTECHLAB):
             await self.do(first_rax.build(BARRACKSTECHLAB))
 
         for index in range(1, len(ready_rax)):
+            if not self.can_afford(BARRACKSREACTOR):
+                break
             rax = ready_rax[index]
             if rax.has_add_on or not rax.noqueue:
                 continue
