@@ -3,7 +3,7 @@ from sc2 import run_game, maps, Race, Difficulty
 from sc2.player import Bot, Computer, Human
 from sc2.constants import *
 
-class Prometheus(sc2.BotAI):
+class TerranBot(sc2.BotAI):
     async def on_step(self, iteration):
         """
         Ticking function called every iteration
@@ -178,5 +178,5 @@ class Prometheus(sc2.BotAI):
 
 
 run_game(maps.get('(2)RedshiftLE'), 
-    [Bot(Race.Terran, Prometheus()), Computer(Race.Protoss, Difficulty.Easy)], 
+    [Bot(Race.Terran, TerranBot()), Computer(Race.Protoss, Difficulty.Easy)], 
     realtime=False)
