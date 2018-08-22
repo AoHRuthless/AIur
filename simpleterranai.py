@@ -1,10 +1,7 @@
-import random
-
 import sc2
 from sc2 import run_game, maps, Race, Difficulty
-from sc2.player import Bot, Computer
-from sc2.constants import COMMANDCENTER, SCV, SUPPLYDEPOT, REFINERY, \
- BARRACKS, BARRACKSTECHLAB, MARINE
+from sc2.player import Bot, Computer, Human
+from sc2.constants import *
 
 class Prometheus(sc2.BotAI):
     async def on_step(self, iteration):
@@ -38,7 +35,7 @@ class Prometheus(sc2.BotAI):
         Constructs supply depots automatically if supply is running low
         """
 
-        if self.supply_left() >= 3 or self.already_pending():
+        if self.supply_left >= 3 or self.already_pending(SUPPLYDEPOT):
             return
 
         if self.ready_bases.exists and self.can_afford(SUPPLYDEPOT):
@@ -48,8 +45,6 @@ class Prometheus(sc2.BotAI):
         """
         Constructs available refineries near constructed command centers
         """
-        if not self.can_afford(REFINERY):
-             return
 
         for base in self.ready_bases:
             vespenes = self.state.vespene_geyser.closer_than(15.0, 
@@ -59,7 +54,8 @@ class Prometheus(sc2.BotAI):
                 if worker is None:
                     break
 
-                if not self.units(REFINERY.closer_than(1.0, vespene)).exists:
+                if not self.units(REFINERY).closer_than(1.0, vespene).exists \
+                and self.can_afford(REFINERY):
                     await self.do(worker.build(REFINERY, vespene))
 
     async def expand(self):
@@ -72,31 +68,17 @@ class Prometheus(sc2.BotAI):
             return
 
         if self.can_afford(COMMANDCENTER):
-            self.expand_now()
+            await self.expand_now()
 
     async def construct_barracks(self):
         """
-        Builds up to two barracks and selects one to build a tech lab add-on.
+        Builds up to three barracks.
         """
 
-        if self.units(BARRACKS).ready.exists and self.units(BARRACKS).
-        amount < 2:
-            await self.upgrade_barracks()
+        if self.units(BARRACKS).ready.amount > 2:
+            return
         elif self.can_afford(BARRACKS) and not self.already_pending(BARRACKS):
             await self.build(BARRACKS, near=self.ready_bases.first)
-
-    async def upgrade_barracks(self):
-        """
-        Upgrades a barrack by adding a tech-lab. Reactors not supported yet.
-        """
-
-        for barrack in self.units(BARRACKS).ready:
-            if not self.units(BARRACKSTECHLAB):
-                if self.can_afford(BARRACKSTECHLAB) and not self.
-                already_pending(BARRACKSTECHLAB):
-                    await self.build(BARRACKSTECHLAB, near=barrack)
-            else:
-                break
 
     async def train_military(self):
         """
@@ -119,25 +101,26 @@ class Prometheus(sc2.BotAI):
 
         if marines.amount >= 12:
             for marine in marines.idle:
-                await self.do(marine.attack(self.seek_target(self.state)))
+                await self.do(marine.attack(self.seek_target))
         elif marines.amount >= 3:    
             for marine in marines.idle:
                 if len(self.known_enemy_units) == 0:
                     break
 
-                enemy_unit = random.choice(self.known_enemy_units)
+                enemy_unit = self.known_enemy_units.random
                 await(self.do(marine.attack(enemy_unit)))
 
-    def seek_target(self, state):
+    @property
+    def seek_target(self):
         """
         Seeks out the enemy to attack with the army. Prioritizes known units > 
         known structures > start location
         """
 
         if len(self.known_enemy_units) > 0:
-            return random.choice(self.known_enemy_units)
+            return self.known_enemy_units.random
         elif len(self.known_enemy_structures) > 0:
-            return random.choice(self.known_enemy_structures)
+            return self.known_enemy_structures.random
         else:
             return self.enemy_start_locations[0]
 
@@ -173,4 +156,4 @@ class Prometheus(sc2.BotAI):
 
 run_game(maps.get('(2)RedshiftLE'), 
     [Bot(Race.Terran, Prometheus()), Computer(Race.Protoss, Difficulty.Easy)], 
-    realtime=True)
+    realtime=False)
