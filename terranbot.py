@@ -18,6 +18,7 @@ class TerranBot(sc2.BotAI):
         await self.construct_refineries()
         await self.expand()
         await self.construct_barracks()
+        await self.upgrade_barracks()
         await self.train_military()
         await self.attack()
 
@@ -35,6 +36,7 @@ class TerranBot(sc2.BotAI):
         """
         Constructs supply depots automatically if supply is running low
         """
+
         if self.supply_cap >= 200:
             return
 
@@ -81,36 +83,42 @@ class TerranBot(sc2.BotAI):
         Builds up to 4 barracks and upgrades as necessary.
         """
 
-        if self.units(BARRACKS).ready.amount > 3:
-            pass
-        elif self.can_afford(BARRACKS) and not self.already_pending(BARRACKS):
+        if not self.units.of_type([SUPPLYDEPOT, 
+            SUPPLYDEPOTLOWERED, 
+            SUPPLYDEPOTDROP]).ready.exists:
+            return
+
+        if self.can_afford(BARRACKS) and not self.already_pending(BARRACKS) \
+        and self.units(BARRACKS).ready.amount < 4:
             await self.build(BARRACKS, 
-                near=self.ready_bases.first, 
+                near=self.ready_bases.first.position, 
                 placement_step=4)
-        await self.upgrade_barracks()
 
     async def upgrade_barracks(self):
         """
-        Upgrades barracks by building add-ons. Logic is one barrack gets a 
-        tech lab and all others get reactors.
+        Upgrades barracks by building one tech lab add-on and up to two 
+        reactors.
         """
 
         ready_rax = self.units(BARRACKS).ready
-        if ready_rax.amount <= 0:
-            return
+        # if ready_rax.amount <= 0:
+        #     return
 
-        first_rax = ready_rax.first
-        if not first_rax.has_add_on and first_rax.noqueue \
-        and self.can_afford(BARRACKSTECHLAB):
-            await self.do(first_rax.build(BARRACKSTECHLAB))
+        # first_rax = ready_rax.first
+        # if not first_rax.has_add_on and first_rax.noqueue \
+        # and self.can_afford(BARRACKSTECHLAB):
+        #     await self.do(first_rax.build(BARRACKSTECHLAB))
 
-        for index in range(1, len(ready_rax)):
-            if not self.can_afford(BARRACKSREACTOR):
-                break
+        for index in range(0, len(ready_rax)):
+            unit = BARRACKSTECHLAB if index == 0 else BARRACKSREACTOR
+
             rax = ready_rax[index]
-            if rax.has_add_on or not rax.noqueue:
-                continue
-            await self.do(rax.build(BARRACKSREACTOR))
+            if not self.can_afford(unit):
+                break
+
+            if not rax.has_add_on and rax.noqueue:
+                await self.do(rax.build(unit)) 
+
 
     async def train_military(self):
         """
@@ -131,7 +139,7 @@ class TerranBot(sc2.BotAI):
 
         marines = self.units(MARINE)
 
-        if marines.amount >= 12:
+        if marines.amount >= 15:
             for marine in marines.idle:
                 await self.do(marine.attack(self.seek_target))
         elif marines.amount >= 3:    
