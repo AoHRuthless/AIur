@@ -72,13 +72,36 @@ class Prometheus(sc2.BotAI):
 
     async def construct_barracks(self):
         """
-        Builds up to three barracks.
+        Builds up to 4 barracks and upgrades as necessary.
         """
 
-        if self.units(BARRACKS).ready.amount > 2:
-            return
+        if self.units(BARRACKS).ready.amount > 3:
+            pass
         elif self.can_afford(BARRACKS) and not self.already_pending(BARRACKS):
-            await self.build(BARRACKS, near=self.ready_bases.first)
+            await self.build(BARRACKS, 
+                near=self.ready_bases.first, 
+                placement_step=4)
+        await self.upgrade_barracks()
+
+    async def upgrade_barracks(self):
+        """
+        Upgrades barracks by building add-ons. Logic is one barrack gets a 
+        tech lab and all others get reactors.
+        """
+
+        ready_rax = self.units(BARRACKS).ready
+        if ready_rax.amount <= 0:
+            return
+
+        first_rax = ready_rax.first
+        if not first_rax.has_add_on and first_rax.noqueue:
+            await self.do(first_rax.build(BARRACKSTECHLAB))
+
+        for index in range(1, len(ready_rax)):
+            rax = ready_rax[index]
+            if rax.has_add_on or not rax.noqueue:
+                continue
+            await self.do(rax.build(BARRACKSREACTOR))
 
     async def train_military(self):
         """
