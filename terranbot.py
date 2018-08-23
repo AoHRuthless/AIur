@@ -1,23 +1,14 @@
+from abstract_bot import AbstractBot
+
 import sc2
 from sc2 import Race, Difficulty
 from sc2.player import Bot, Computer, Human
 from sc2.helpers import ControlGroup
 from sc2.constants import *
 
-class MMMBot(sc2.BotAI):
-    def __init__(self):
-        self.attack_waves = set()
-        self.iterations_per_min = 165
-        self.max_workers = 65
-
+class MMMBot(AbstractBot):
     async def on_step(self, iteration):
-        self.iteration = iteration
-        if not self.townhalls.exists:
-            for unit in self.units:
-                await self.do(unit.attack(self.target))
-            return
-
-        await self.distribute_workers()
+        await super().on_step(iteration)
         if 5 > self.townhalls.amount < self.minutes_elapsed / 2.9:
             await self.expand()
             return
@@ -199,28 +190,6 @@ class MMMBot(sc2.BotAI):
                     await self.do(unit.attack(self.target))
             else:
                 self.attack_waves.remove(wave)
-
-    @property
-    def target(self):
-        """
-        Seeks a random enemy structure or prioritizes the start location
-        """
-        return self.known_enemy_structures.random_or(self.
-            enemy_start_locations[0]).position
-
-    @property
-    def minutes_elapsed(self):
-        """
-        Grabs the minutes currently elapsed.
-        """
-        return self.iteration / self.iterations_per_min
-
-    @property
-    def seconds_elapsed(self):
-        """
-        Grabs the seconds currently elapsed.
-        """
-        return self.iteration / (self.iterations_per_min / 60)
     
 
 # RUN GAME
