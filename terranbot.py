@@ -1,192 +1,230 @@
 import sc2
-from sc2 import run_game, maps, Race, Difficulty
+from sc2 import Race, Difficulty
 from sc2.player import Bot, Computer, Human
+from sc2.helpers import ControlGroup
 from sc2.constants import *
-from sc2.ids.ability_id import *
 
 class TerranBot(sc2.BotAI):
-    async def on_step(self, iteration):
-        """
-        Ticking function called every iteration
+    def __init__(self):
+        self.attack_waves = set()
+        self.iterations_per_min = 165
+        self.max_workers = 65
 
-        :param <iteration>: The iteration of the step
-        """
+    async def on_step(self, iteration):
+        self.iteration = iteration
+        if not self.townhalls.exists:
+            for unit in self.units:
+                await self.do(unit.attack(self.target))
+            return
 
         await self.distribute_workers()
-        await self.train_workers()
-        await self.construct_supply_depots()
-        await self.construct_refineries()
-        await self.expand()
-        await self.construct_barracks()
-        await self.upgrade_barracks()
+        if 5 > self.townhalls.amount < self.minutes_elapsed / 2.9:
+            await self.expand()
+            return
+
+        self.prepare_attack()
+        await self.manage_workers()
+        await self.manage_supply()
+        await self.manage_military_training_structures()
         await self.train_military()
         await self.attack()
 
-    async def train_workers(self):
+    async def manage_workers(self):
         """
-        Checks each available command center and trains an SCV 
-        asynchonrously.
+        Manages workers and trains SCVs as needed.
         """
 
-        for base in self.ready_bases.noqueue:
+        if self.townhalls.amount * 16 <= self.workers.amount \
+        or self.max_workers <= self.workers.amount:
+            return
+
+        for base in self.units(COMMANDCENTER).ready.noqueue:
             if self.can_afford(SCV):
                 await self.do(base.train(SCV))
+        await self.manage_gas()
 
-    async def construct_supply_depots(self):
+    async def manage_gas(self):
         """
-        Constructs supply depots automatically if supply is running low
+        Logic to have workers build refineries then assign workers as needed.
         """
 
-        if self.supply_cap >= 200:
+        if self.units(BARRACKS).exists \
+        and self.units(REFINERY).amount < self.townhalls.amount * 1.5:
+            if self.can_afford(REFINERY):
+                for cc in self.townhalls:
+                    for vg in self.state.vespene_geyser.closer_than(10, cc):
+                        if self.units(REFINERY).closer_than(1, vg).exists:
+                            break
+
+                        worker = self.select_build_worker(vg.position)
+                        if worker is None:
+                            break
+
+                        await self.do(worker.build(REFINERY, vg))
+                        break
+
+    async def manage_supply(self):
+        """
+        Manages supply limits. Supply depots are lowered when built.
+        """
+
+        if self.supply_cap >= 200 and self.units(SUPPLYDEPOT) > 0:
             return
 
-        if self.supply_left >= 3 or self.already_pending(SUPPLYDEPOT):
-            return
-
-        if self.ready_bases.exists and self.can_afford(SUPPLYDEPOT):
-            await self.build(SUPPLYDEPOT, near=self.ready_bases.first)
+        if self.supply_left < 4 and self.can_afford(SUPPLYDEPOT) \
+        and self.already_pending(SUPPLYDEPOT) < 2:
+            position = self.townhalls.random.position.towards(
+                self.game_info.map_center, 5)
+            await self.build(SUPPLYDEPOT, position)
 
         for depot in self.units(SUPPLYDEPOT).ready:
             await self.do(depot(MORPH_SUPPLYDEPOT_LOWER))
 
-    async def construct_refineries(self):
-        """
-        Constructs available refineries near constructed command centers
-        """
-
-        for base in self.ready_bases:
-            vespenes = self.state.vespene_geyser.closer_than(15.0, 
-                base)
-            for vespene in vespenes:
-                worker = self.select_build_worker(vespene.position)
-                if worker is None:
-                    break
-
-                if not self.units(REFINERY).closer_than(1.0, vespene).exists \
-                and self.can_afford(REFINERY):
-                    await self.do(worker.build(REFINERY, vespene))
-
     async def expand(self):
         """
-        Expands now if affordable. Currently, expansion is arbitrarily 
-        limited to 3 command centers.
+        Constructs a new expansion when possible. # Expansions scale with time.
         """
 
-        if self.num_bases >= 3:
+        if self.townhalls.amount >= max(3, 2 + self.minutes_elapsed / 4):
             return
 
         if self.can_afford(COMMANDCENTER):
             await self.expand_now()
 
-    async def construct_barracks(self):
+    async def manage_military_training_structures(self):
         """
-        Builds up to 4 barracks and upgrades as necessary.
+        Trains and upgrades military structures. Since this bot is a bio army, 
+        we only need one factory. # Barracks and Starports scale with time. 
+        Algorithm attempts to place a tech lab onto each barrack, and all 
+        upgrades are researched.
         """
 
-        if not self.units.of_type([SUPPLYDEPOT, 
+        if not self.units.of_type([
+            SUPPLYDEPOT, 
             SUPPLYDEPOTLOWERED, 
-            SUPPLYDEPOTDROP]).ready.exists:
+            SUPPLYDEPOTDROP
+            ]).ready.exists:
+            return 
+
+        if self.units(BARRACKS).amount < max(4, self.minutes_elapsed / 2):
+            if self.can_afford(BARRACKS):
+                await self.build(BARRACKS, 
+                    near=self.townhalls.random.position, 
+                    placement_step=5)
+
+        if self.units(BARRACKS).ready.amount < 1:
             return
 
-        if self.can_afford(BARRACKS) and not self.already_pending(BARRACKS) \
-        and self.units(BARRACKS).ready.amount < 4:
-            await self.build(BARRACKS, 
-                near=self.ready_bases.first.position, 
-                placement_step=4)
+        for barrack in self.units(BARRACKS).ready.noqueue:
+            if not barrack.has_add_on and self.can_afford(BARRACKSTECHLAB):
+                await self.do(barrack.build(BARRACKSTECHLAB))
+        for rax_lab in self.units(BARRACKSTECHLAB).ready.noqueue:
+            abilities = await self.get_available_abilities(rax_lab)
+            for ability in abilities:
+                if self.can_afford(ability):
+                    await self.do(rax_lab(ability))
 
-    async def upgrade_barracks(self):
-        """
-        Upgrades barracks by building one tech lab add-on and up to two 
-        reactors.
-        """
+        if self.units(FACTORY).amount < 1:
+            if self.can_afford(FACTORY):
+                await self.build(FACTORY, 
+                    near=self.townhalls.random.position, 
+                    placement_step=7)
 
-        ready_rax = self.units(BARRACKS).ready
+        if self.units(FACTORY).ready.amount < 1:
+            return
 
-        for index in range(0, len(ready_rax)):
-            unit = BARRACKSTECHLAB if index == 0 else BARRACKSREACTOR
-
-            rax = ready_rax[index]
-            if not self.can_afford(unit):
-                break
-
-            if not rax.has_add_on and rax.noqueue:
-                await self.do(rax.build(unit)) 
-
+        if self.units(STARPORT).amount < max(2, self.minutes_elapsed / 2 - 5):
+            if self.can_afford(STARPORT):
+                await self.build(STARPORT, 
+                    near=self.townhalls.random.position, 
+                    placement_step=7)
 
     async def train_military(self):
         """
-        Trains our army.
-
-        Hoorah for marines!
+        Trains our bio-terran MMM army.
         """
 
-        for barrack in self.units(BARRACKS).ready.noqueue:
-            if self.can_afford(MARINE) and self.supply_left > 0:
-                await self.do(barrack.train(MARINE))
+        for rax in self.units(BARRACKS).ready.noqueue:
+            if self.can_afford(MARAUDER) and rax.has_add_on:
+                await self.do(rax.train(MARAUDER))
+            elif self.can_afford(MARINE):
+                await self.do(rax.train(MARINE))
+        for sp in self.units(STARPORT).ready.noqueue:
+            if not self.can_afford(MEDIVAC):
+                break
+            await self.do(sp.train(MEDIVAC))
+
+    def prepare_attack(self):
+        """
+        Prepares an attack wave every 10 seconds, when applicable. Each wave must have at least 12 units, and is added to in batches.
+        """
+
+        if self.seconds_elapsed % 10 != 0:
+            return
+
+        offensive_ratio = {
+            MARINE: 7,
+            MARAUDER: 3,
+            MEDIVAC: 2
+        }
+
+        added_non_medic_units = False
+        attack_wave = None
+        for unit in offensive_ratio:
+            if not added_non_medic_units and unit == MEDIVAC:
+                continue
+
+            amount = offensive_ratio[unit]
+            units = self.units(unit)
+
+            if units.idle.amount >= amount:
+                if unit != MEDIVAC:
+                    added_non_medic_units = True
+                if attack_wave is None:
+                    attack_wave = ControlGroup(units.idle)
+                else:
+                    attack_wave.add_units(units.idle)
+        if attack_wave is not None and 0 < len(attack_wave) > 12:
+            self.attack_waves.add(attack_wave)
 
     async def attack(self):
         """
-        Determines whether or not to send our marines to seek the enemy or 
-        defend the base.
+        Sends any attack group out to target. No micro is done on the army 
+        dispatch.
         """
-
-        marines = self.units(MARINE)
-
-        if marines.amount >= 15:
-            for marine in marines.idle:
-                await self.do(marine.attack(self.seek_target))
-        elif marines.amount >= 3:    
-            for marine in marines.idle:
-                if len(self.known_enemy_units) == 0:
-                    break
-
-                enemy_unit = self.known_enemy_units.random
-                await(self.do(marine.attack(enemy_unit)))
+        for wave in list(self.attack_waves):
+            alive_units = wave.select_units(self.units)
+            if alive_units.exists and alive_units.idle.exists:
+                for unit in wave.select_units(self.units):
+                    await self.do(unit.attack(self.target))
+            else:
+                self.attack_waves.remove(wave)
 
     @property
-    def seek_target(self):
+    def target(self):
         """
-        Seeks out the enemy to attack with the army. Prioritizes known units > 
-        known structures > start location
+        Seeks a random enemy structure or prioritizes the start location
         """
-
-        if len(self.known_enemy_units) > 0:
-            return self.known_enemy_units.random
-        elif len(self.known_enemy_structures) > 0:
-            return self.known_enemy_structures.random
-        else:
-            return self.enemy_start_locations[0]
+        return self.known_enemy_structures.random_or(self.
+            enemy_start_locations[0]).position
 
     @property
-    def num_workers(self):
+    def minutes_elapsed(self):
         """
-        Grabs the number of scvs.
+        Grabs the minutes currently elapsed.
         """
-        return self.units(SCV).amount
-    
-    @property
-    def num_bases(self):
-        """
-        Grabs the number of command centers.
-        """
-        return self.bases.amount
+        return self.iteration / self.iterations_per_min
 
     @property
-    def ready_bases(self):
+    def seconds_elapsed(self):
         """
-        Grabs the number of ready command centers.
+        Grabs the seconds currently elapsed.
         """
-        return self.bases.ready
-
-    @property
-    def bases(self):
-        """
-        Grabs all command center units.
-        """
-        return self.units(COMMANDCENTER)
+        return self.iteration / (self.iterations_per_min / 60)
     
 
-
-run_game(maps.get('(2)RedshiftLE'), 
-    [Bot(Race.Terran, TerranBot()), Computer(Race.Protoss, Difficulty.Easy)], 
-    realtime=False)
+# RUN GAME
+sc2.run_game(sc2.maps.get('(2)RedshiftLE'), [
+    Bot(Race.Terran, TerranBot()), 
+    Computer(Race.Zerg, Difficulty.Medium)
+    ], realtime=False)
