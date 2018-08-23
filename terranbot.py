@@ -4,7 +4,7 @@ from sc2.player import Bot, Computer, Human
 from sc2.helpers import ControlGroup
 from sc2.constants import *
 
-class TerranBot(sc2.BotAI):
+class MMMBot(sc2.BotAI):
     def __init__(self):
         self.attack_waves = set()
         self.iterations_per_min = 165
@@ -225,6 +225,6 @@ class TerranBot(sc2.BotAI):
 
 # RUN GAME
 sc2.run_game(sc2.maps.get('(2)RedshiftLE'), [
-    Bot(Race.Terran, TerranBot()), 
+    Bot(Race.Terran, MMMBot()), 
     Computer(Race.Zerg, Difficulty.Medium)
     ], realtime=False)
