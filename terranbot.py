@@ -101,13 +101,6 @@ class TerranBot(sc2.BotAI):
         """
 
         ready_rax = self.units(BARRACKS).ready
-        # if ready_rax.amount <= 0:
-        #     return
-
-        # first_rax = ready_rax.first
-        # if not first_rax.has_add_on and first_rax.noqueue \
-        # and self.can_afford(BARRACKSTECHLAB):
-        #     await self.do(first_rax.build(BARRACKSTECHLAB))
 
         for index in range(0, len(ready_rax)):
             unit = BARRACKSTECHLAB if index == 0 else BARRACKSREACTOR
