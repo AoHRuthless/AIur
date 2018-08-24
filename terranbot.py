@@ -3,7 +3,6 @@ from abstract_bot import AbstractBot
 import sc2
 from sc2 import Race, Difficulty
 from sc2.player import Bot, Computer, Human
-from sc2.helpers import ControlGroup
 from sc2.constants import *
 
 class MMMBot(AbstractBot):
@@ -13,12 +12,16 @@ class MMMBot(AbstractBot):
             await self.expand()
             return
 
-        self.prepare_attack()
+        military = {
+            MARINE: 7,
+            MARAUDER: 3,
+            MEDIVAC: 2
+        }
+
+        self.prepare_attack(military)
         await self.manage_workers()
         await self.manage_supply()
-        await self.manage_military_training_structures()
-        await self.train_military()
-        await self.attack()
+        await self.handle_military()
 
     async def manage_workers(self):
         """
@@ -41,26 +44,28 @@ class MMMBot(AbstractBot):
 
         if self.units(BARRACKS).exists \
         and self.units(REFINERY).amount < self.townhalls.amount * 1.5:
-            if self.can_afford(REFINERY):
-                for cc in self.townhalls:
-                    for vg in self.state.vespene_geyser.closer_than(10, cc):
-                        if self.units(REFINERY).closer_than(1, vg).exists:
-                            break
-
-                        worker = self.select_build_worker(vg.position)
-                        if worker is None:
-                            break
-
-                        await self.do(worker.build(REFINERY, vg))
+            for cc in self.townhalls:
+                for vg in self.state.vespene_geyser.closer_than(15, cc):
+                    if self.units(REFINERY).closer_than(1, vg).exists:
                         break
+
+                    worker = self.select_build_worker(vg.position)
+                    if worker is None or not self.can_afford(REFINERY):
+                        break
+
+                    await self.do(worker.build(REFINERY, vg))
+                    break
 
     async def manage_supply(self):
         """
         Manages supply limits. Supply depots are lowered when built.
         """
 
-        if self.supply_cap >= 200 and self.units(SUPPLYDEPOT) > 0:
-            return
+        if self.supply_cap >= 200 and self.units.of_type([SUPPLYDEPOT, 
+            SUPPLYDEPOTLOWERED, 
+            SUPPLYDEPOTDROP
+            ]).ready.exists:
+                return
 
         if self.supply_left < 4 and self.can_afford(SUPPLYDEPOT) \
         and self.already_pending(SUPPLYDEPOT) < 2:
@@ -109,11 +114,6 @@ class MMMBot(AbstractBot):
         for barrack in self.units(BARRACKS).ready.noqueue:
             if not barrack.has_add_on and self.can_afford(BARRACKSTECHLAB):
                 await self.do(barrack.build(BARRACKSTECHLAB))
-        for rax_lab in self.units(BARRACKSTECHLAB).ready.noqueue:
-            abilities = await self.get_available_abilities(rax_lab)
-            for ability in abilities:
-                if self.can_afford(ability):
-                    await self.do(rax_lab(ability))
 
         if self.units(FACTORY).amount < 1:
             if self.can_afford(FACTORY):
@@ -130,6 +130,16 @@ class MMMBot(AbstractBot):
                     near=self.townhalls.random.position, 
                     placement_step=7)
 
+    async def manage_military_add_ons(self):
+        for rax_lab in self.units(BARRACKSTECHLAB).ready.noqueue:
+            abilities = await self.get_available_abilities(rax_lab)
+            for ability in abilities:
+                if self.can_afford(ability):
+                    await self.do(rax_lab(ability))
+
+    async def manage_military_research_structures(self):
+        pass
+
     async def train_military(self):
         """
         Trains our bio-terran MMM army.
@@ -144,52 +154,6 @@ class MMMBot(AbstractBot):
             if not self.can_afford(MEDIVAC):
                 break
             await self.do(sp.train(MEDIVAC))
-
-    def prepare_attack(self):
-        """
-        Prepares an attack wave every 10 seconds, when applicable. Each wave must have at least 12 units, and is added to in batches.
-        """
-
-        if self.seconds_elapsed % 10 != 0:
-            return
-
-        offensive_ratio = {
-            MARINE: 7,
-            MARAUDER: 3,
-            MEDIVAC: 2
-        }
-
-        added_non_medic_units = False
-        attack_wave = None
-        for unit in offensive_ratio:
-            if not added_non_medic_units and unit == MEDIVAC:
-                continue
-
-            amount = offensive_ratio[unit]
-            units = self.units(unit)
-
-            if units.idle.amount >= amount:
-                if unit != MEDIVAC:
-                    added_non_medic_units = True
-                if attack_wave is None:
-                    attack_wave = ControlGroup(units.idle)
-                else:
-                    attack_wave.add_units(units.idle)
-        if attack_wave is not None and 0 < len(attack_wave) > 12:
-            self.attack_waves.add(attack_wave)
-
-    async def attack(self):
-        """
-        Sends any attack group out to target. No micro is done on the army 
-        dispatch.
-        """
-        for wave in list(self.attack_waves):
-            alive_units = wave.select_units(self.units)
-            if alive_units.exists and alive_units.idle.exists:
-                for unit in wave.select_units(self.units):
-                    await self.do(unit.attack(self.target))
-            else:
-                self.attack_waves.remove(wave)
     
 
 # RUN GAME
