@@ -1,3 +1,5 @@
+from protocols import gas_protocol, expansion_protocol
+
 from abstract_bot import AbstractBot
 
 import sc2
@@ -6,10 +8,16 @@ from sc2.player import Bot, Computer, Human
 from sc2.constants import *
 
 class MMMBot(AbstractBot):
+    def __init__(self):
+        super().__init__()
+        self.gas_handler = gas_protocol.GasProtocol(self)
+        self.expansion_handler = expansion_protocol.ExpansionProtocol(self)
+
     async def on_step(self, iteration):
         await super().on_step(iteration)
         if 5 > self.townhalls.amount < self.minutes_elapsed / 2.9:
-            await self.expand()
+            await self.expansion_handler.expand(
+                max(3, 2 + self.minutes_elapsed / 4))
             return
 
         military = {
@@ -20,6 +28,7 @@ class MMMBot(AbstractBot):
 
         self.prepare_attack(military)
         await self.manage_workers()
+        await self.manage_gas()
         await self.manage_supply()
         await self.handle_military()
 
@@ -35,26 +44,14 @@ class MMMBot(AbstractBot):
         for base in self.units(COMMANDCENTER).ready.noqueue:
             if self.can_afford(SCV):
                 await self.do(base.train(SCV))
-        await self.manage_gas()
 
     async def manage_gas(self):
         """
         Logic to have workers build refineries then assign workers as needed.
         """
 
-        if self.units(BARRACKS).exists \
-        and self.units(REFINERY).amount < self.townhalls.amount * 1.5:
-            for cc in self.townhalls:
-                for vg in self.state.vespene_geyser.closer_than(15, cc):
-                    if self.units(REFINERY).closer_than(1, vg).exists:
-                        break
-
-                    worker = self.select_build_worker(vg.position)
-                    if worker is None or not self.can_afford(REFINERY):
-                        break
-
-                    await self.do(worker.build(REFINERY, vg))
-                    break
+        if self.units(BARRACKS).exists:
+            await self.gas_handler.manage_gas(1.5)
 
     async def manage_supply(self):
         """
@@ -75,17 +72,6 @@ class MMMBot(AbstractBot):
 
         for depot in self.units(SUPPLYDEPOT).ready:
             await self.do(depot(MORPH_SUPPLYDEPOT_LOWER))
-
-    async def expand(self):
-        """
-        Constructs a new expansion when possible. # Expansions scale with time.
-        """
-
-        if self.townhalls.amount >= max(3, 2 + self.minutes_elapsed / 4):
-            return
-
-        if self.can_afford(COMMANDCENTER):
-            await self.expand_now()
 
     async def manage_military_training_structures(self):
         """
@@ -159,5 +145,5 @@ class MMMBot(AbstractBot):
 # RUN GAME
 sc2.run_game(sc2.maps.get('(2)RedshiftLE'), [
     Bot(Race.Terran, MMMBot()), 
-    Computer(Race.Zerg, Difficulty.Medium)
+    Computer(Race.Protoss, Difficulty.Medium)
     ], realtime=False)
