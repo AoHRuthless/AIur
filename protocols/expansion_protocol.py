@@ -3,15 +3,15 @@ from sc2 import Race
 from sc2.constants import *
 
 class ExpansionProtocol(object):
-    def __init__(self, sc2):
-        self.sc2 = sc2
+    def __init__(self, bot):
+        self.bot = bot
 
     async def expand(self, amount):
-        if self.sc2.townhalls.amount >= amount:
+        if self.bot.townhalls.amount >= amount:
             return
 
-        if self.sc2.can_afford(self.townhall_unit):
-            await self.sc2.expand_now()
+        if self.bot.can_afford(self.townhall_unit):
+            await self.bot.expand_now()
 
     @property
     def townhall_unit(self):
@@ -20,4 +20,4 @@ class ExpansionProtocol(object):
             Race.Zerg: HATCHERY,
             Race.Protoss: NEXUS
         }
-        return races[self.sc2.race]
+        return races[self.bot.race]
