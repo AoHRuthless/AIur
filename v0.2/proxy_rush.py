@@ -7,6 +7,9 @@ from sc2.player import Bot, Computer
 
 ITERATIONS_PER_MINUTE = 165
 
+import cv2 as cv
+import numpy as np
+
 class ProxyRaxRushBot(sc2.BotAI):
     async def on_step(self, iteration):
         self.iteration = iteration
@@ -26,8 +29,23 @@ class ProxyRaxRushBot(sc2.BotAI):
         await self.manage_supply()
         await self.manage_military_training_structures()
         await self.train_military()
+        await self.collect_intel()
         await self.attack()
         await self.task_workers()
+
+    async def collect_intel(self):
+        # game coordinates need to be represented as (y, x) in 2d arrays
+        game_data = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
+        rgb = (0, 255, 0)
+        for cc in self.townhalls:
+            posn = cc.position
+            cv.circle(game_data, (int(posn[0]), int(posn[1])), 10, rgb, -1)
+
+        # cv assumes (0, 0) top-left => need to flip along horizontal axis
+        flipped = cv.flip(game_data, 0)
+
+        cv.imshow('Map', cv.resize(flipped, dsize=None, fx=2, fy=2))
+        cv.waitKey(1)
 
     async def manage_workers(self):
         if self.can_afford(SCV) and self.workers.amount <= 15 \
