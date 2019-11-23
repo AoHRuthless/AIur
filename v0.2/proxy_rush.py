@@ -61,14 +61,25 @@ class ProxyRaxRushBot(sc2.BotAI):
         await self.manage_supply()
         await self.manage_military_training_structures()
         await self.train_military()
-        await self.collect_intel()
+        await self.visualize()
         await self.attack()
         await self.task_workers()
 
-    async def collect_intel(self):
-        # game coordinates need to be represented as (y, x) in 2d arrays
+    async def visualize(self):
         game_map = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
-        rgb = (0, 255, 0)
+        await self.visualize_map(game_map)
+        await self.visualize_resources(game_map)
+
+        # cv assumes (0, 0) top-left => need to flip along horizontal axis
+        flipped = cv.flip(game_map, 0)
+
+        cv.imshow('Map', cv.resize(flipped, dsize=None, fx=2, fy=2))
+        cv.waitKey(1)
+
+
+
+    async def visualize_map(self, game_map):
+        # game coordinates need to be represented as (y, x) in 2d arrays
         for typ, intel in self.unit_intel.items():
             for unit in self.units(typ).ready:
                 posn = unit.position
@@ -82,11 +93,21 @@ class ProxyRaxRushBot(sc2.BotAI):
                 l = intel[0] * 1.75
                 cv.rectangle(game_map, (int(x), int(y)), (int(x + l), int(y + l)), intel[1], -1)
 
-        # cv assumes (0, 0) top-left => need to flip along horizontal axis
-        flipped = cv.flip(game_map, 0)
+    async def visualize_resources(self, game_map):
+        line_scalar = 40
+        minerals = min(1.0, self.minerals / 1200)
+        vespene = min(1.0, self.vespene / 1200)
+        pop_space = min(1.0, self.supply_left / self.supply_cap)
+        supply_usage = self.supply_cap / 200
+        military = (self.supply_cap - self.supply_left - self.workers.amount) \
+        / (self.supply_cap - self.supply_left)
 
-        cv.imshow('Map', cv.resize(flipped, dsize=None, fx=2, fy=2))
-        cv.waitKey(1)
+
+        cv.line(game_map, (0, 16), (int(line_scalar*minerals), 16), (255, 40, 37), 2)  
+        cv.line(game_map, (0, 12), (int(line_scalar*vespene), 12), (25, 240, 20), 2)
+        cv.line(game_map, (0, 8),  (int(line_scalar*pop_space), 8), (150, 150, 150), 2)
+        cv.line(game_map, (0, 4),  (int(line_scalar*supply_usage), 4), (64, 64, 64), 2)
+        cv.line(game_map, (0, 0),  (int(line_scalar*military), 0), (0, 0, 255), 2)
 
     async def manage_workers(self):
         if self.can_afford(SCV) and self.workers.amount <= 15 \
