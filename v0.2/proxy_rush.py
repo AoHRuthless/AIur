@@ -49,10 +49,11 @@ class ProxyRaxRushBot(sc2.BotAI):
             ZEALOT: [1, (0, 0, 240), "zealot"],
             ZERGLING: [1, (0, 0, 240), "zergling"],
             STALKER: [1, (0, 75, 215), "stalker"],
+            OBSERVER: [1, (65, 60, 30), "observer"]
 
-            SCV:   [1, (65, 60, 30), "scv"],
-            PROBE: [1, (65, 60, 30), "probe"],
-            DRONE: [1, (65, 60, 30), "drone"]
+            SCV:   [1, (34, 237, 200), "scv"],
+            PROBE: [1, (34, 237, 200), "probe"],
+            DRONE: [1, (34, 237, 200), "drone"]
         }
 
         self.prepare_attack(military, interval=21)
