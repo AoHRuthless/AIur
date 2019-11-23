@@ -5,10 +5,10 @@ from sc2.constants import *
 from sc2.helpers import ControlGroup
 from sc2.player import Bot, Computer
 
-ITERATIONS_PER_MINUTE = 165
-
 import cv2 as cv
 import numpy as np
+
+ITERATIONS_PER_MINUTE = 165
 
 class ProxyRaxRushBot(sc2.BotAI):
     async def on_step(self, iteration):
@@ -49,7 +49,7 @@ class ProxyRaxRushBot(sc2.BotAI):
             ZEALOT: [1, (0, 0, 240), "zealot"],
             ZERGLING: [1, (0, 0, 240), "zergling"],
             STALKER: [1, (0, 75, 215), "stalker"],
-            OBSERVER: [1, (65, 60, 30), "observer"]
+            OBSERVER: [1, (65, 60, 30), "observer"],
 
             SCV:   [1, (34, 237, 200), "scv"],
             PROBE: [1, (34, 237, 200), "probe"],
@@ -79,7 +79,7 @@ class ProxyRaxRushBot(sc2.BotAI):
                 posn = unit.position
                 x = posn[0]
                 y = posn[1]
-                l = intel[0] * 2
+                l = intel[0] * 1.75
                 cv.rectangle(game_map, (int(x), int(y)), (int(x + l), int(y + l)), intel[1], -1)
 
         # cv assumes (0, 0) top-left => need to flip along horizontal axis
@@ -91,7 +91,7 @@ class ProxyRaxRushBot(sc2.BotAI):
     async def manage_workers(self):
         if self.can_afford(SCV) and self.workers.amount <= 15 \
         and self.command_center.noqueue:
-            await self.do(self.command_center.train(SCV)) 
+            await self.do(self.command_center.train(SCV))
 
     async def manage_supply(self):
         supply_threshold = 2 if self.barracks.amount < 3 else 4
