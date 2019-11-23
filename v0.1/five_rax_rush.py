@@ -81,7 +81,10 @@ class ProxyRaxRushBot(AbstractBot):
 
 # Can beat elite protoss and terran AI with ease
 # Loses occasionally to elite early zergling/roach push
-sc2.run_game(sc2.maps.get("(2)RedshiftLE"), [
+result = sc2.run_game(sc2.maps.get("(2)RedshiftLE"), [
     Bot(Race.Terran, ProxyRaxRushBot()),
     Computer(Race.Protoss, Difficulty.VeryHard)
     ], realtime=False)
+
+print("----")
+print(result)
