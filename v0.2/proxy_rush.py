@@ -24,6 +24,16 @@ class ProxyRaxRushBot(sc2.BotAI):
         military = {
             MARINE: 15
         }
+
+        # note that colors are in BGR representation
+        self.unit_intel = {
+            COMMANDCENTER: [12, (0, 255, 0)],
+            SUPPLYDEPOT: [3, (55, 120, 0)],
+            BARRACKS: [5, (200, 40, 0)],
+            MARINE: [1, (0, 0, 240)],
+            SCV: [1, (65, 60, 30)]
+        }
+
         self.prepare_attack(military, interval=21)
         await self.manage_workers()
         await self.manage_supply()
@@ -37,9 +47,10 @@ class ProxyRaxRushBot(sc2.BotAI):
         # game coordinates need to be represented as (y, x) in 2d arrays
         game_data = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
         rgb = (0, 255, 0)
-        for cc in self.townhalls:
-            posn = cc.position
-            cv.circle(game_data, (int(posn[0]), int(posn[1])), 10, rgb, -1)
+        for typ, intel in self.unit_intel.items():
+            for unit in self.units(typ).ready:
+                posn = unit.position
+                cv.circle(game_data, (int(posn[0]), int(posn[1])), intel[0], intel[1], -1)
 
         # cv assumes (0, 0) top-left => need to flip along horizontal axis
         flipped = cv.flip(game_data, 0)
