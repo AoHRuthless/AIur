@@ -27,11 +27,32 @@ class ProxyRaxRushBot(sc2.BotAI):
 
         # note that colors are in BGR representation
         self.unit_intel = {
-            COMMANDCENTER: [12, (0, 255, 0)],
-            SUPPLYDEPOT: [3, (55, 120, 0)],
-            BARRACKS: [5, (200, 40, 0)],
-            MARINE: [1, (0, 0, 240)],
-            SCV: [1, (65, 60, 30)]
+            COMMANDCENTER: [12, (0, 255, 0), "commandcenter"],
+            NEXUS:         [12, (0, 255, 0), "nexus"],
+            HATCHERY:      [12, (0, 255, 0), "hatchery"],
+
+            SUPPLYDEPOT:        [3, (55, 120, 0), "supplydepot"],
+            SUPPLYDEPOTLOWERED: [3, (55, 120, 0), "supplydepotlowered"],
+            PYLON:              [3, (55, 120, 0), "pylon"],
+            OVERSEER:           [3, (55, 120, 0), "overseer"],
+            OVERLORD:           [3, (55, 120, 0), "overlord"],
+
+            REFINERY:    [3, (100, 100, 100), "refinery"],
+            ASSIMILATOR: [3, (100, 100, 100), "assimilator"],
+
+            BARRACKS: [5, (200, 40, 0), "barracks"],
+            GATEWAY: [5, (200, 40, 0), "gateway"],
+            CYBERNETICSCORE: [5, (175, 45, 40), "cyberneticscore"],
+            ROBOTICSFACILITY: [5, (128, 32, 32), "cyberneticscore"],
+
+            MARINE: [1, (0, 0, 240), "marine"],
+            ZEALOT: [1, (0, 0, 240), "zealot"],
+            ZERGLING: [1, (0, 0, 240), "zergling"],
+            STALKER: [1, (0, 75, 215), "stalker"],
+
+            SCV:   [1, (65, 60, 30), "scv"],
+            PROBE: [1, (65, 60, 30), "probe"],
+            DRONE: [1, (65, 60, 30), "drone"]
         }
 
         self.prepare_attack(military, interval=21)
@@ -45,15 +66,23 @@ class ProxyRaxRushBot(sc2.BotAI):
 
     async def collect_intel(self):
         # game coordinates need to be represented as (y, x) in 2d arrays
-        game_data = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
+        game_map = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
         rgb = (0, 255, 0)
         for typ, intel in self.unit_intel.items():
             for unit in self.units(typ).ready:
                 posn = unit.position
-                cv.circle(game_data, (int(posn[0]), int(posn[1])), intel[0], intel[1], -1)
+                cv.circle(game_map, (int(posn[0]), int(posn[1])), intel[0], intel[1], -1)
+            for unit in self.known_enemy_units:
+                if unit.name.lower() != intel[2].lower():
+                    continue
+                posn = unit.position
+                x = posn[0]
+                y = posn[1]
+                l = intel[0] * 2
+                cv.rectangle(game_map, (int(x), int(y)), (int(x + l), int(y + l)), intel[1], -1)
 
         # cv assumes (0, 0) top-left => need to flip along horizontal axis
-        flipped = cv.flip(game_data, 0)
+        flipped = cv.flip(game_map, 0)
 
         cv.imshow('Map', cv.resize(flipped, dsize=None, fx=2, fy=2))
         cv.waitKey(1)
