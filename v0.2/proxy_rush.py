@@ -8,9 +8,37 @@ from sc2.player import Bot, Computer
 import cv2 as cv
 import numpy as np
 
+import random
+
 ITERATIONS_PER_MINUTE = 165
 
 class ProxyRaxRushBot(sc2.BotAI):
+
+    def __init__(self):
+        # Parameters to randomly train on
+        self.num_workers = random.randrange(12, 26)
+        self.num_marines = random.randrange(1, 25)
+        self.attack_interval_seconds = random.randrange(8, 40)
+        self.attack_wave_threshold = random.randrange(0, 20)
+        self.num_barracks = random.randrange(1, 6)
+
+        print('--- Parameters ---')
+        print(f'num workers = {self.num_workers}')
+        print(f'num marines = {self.num_marines}')
+        print(f'interval attack = {self.attack_interval_seconds}')
+        print(f'threshold attack = {self.attack_wave_threshold}')
+        print(f'num barracks = {self.num_barracks}')
+        print('------------------')
+
+        self.parameters = [
+            self.num_workers, 
+            self.num_marines, 
+            self.attack_interval_seconds, 
+            self.attack_wave_threshold,
+            self.num_barracks
+        ]
+        self.states = []
+
     async def on_step(self, iteration):
         self.iteration = iteration
         self.attack_waves = set()
@@ -22,7 +50,7 @@ class ProxyRaxRushBot(sc2.BotAI):
         self.command_center = self.townhalls.first
 
         military = {
-            MARINE: 15
+            MARINE: self.num_marines
         }
 
         # note that colors are in BGR representation
@@ -56,7 +84,7 @@ class ProxyRaxRushBot(sc2.BotAI):
             DRONE: [1, (34, 237, 200), "drone"]
         }
 
-        self.prepare_attack(military, interval=21)
+        self.prepare_attack(military, interval=self.attack_interval_seconds)
         await self.manage_workers()
         await self.manage_supply()
         await self.manage_military_training_structures()
@@ -72,6 +100,7 @@ class ProxyRaxRushBot(sc2.BotAI):
 
         # cv assumes (0, 0) top-left => need to flip along horizontal axis
         flipped = cv.flip(game_map, 0)
+        self.states.append(flipped)
 
         cv.imshow('Map', cv.resize(flipped, dsize=None, fx=2, fy=2))
         cv.waitKey(1)
@@ -110,12 +139,13 @@ class ProxyRaxRushBot(sc2.BotAI):
         cv.line(game_map, (0, 0),  (int(line_scalar*military), 0), (0, 0, 255), 2)
 
     async def manage_workers(self):
-        if self.can_afford(SCV) and self.workers.amount <= 15 \
+        if self.can_afford(SCV) and self.workers.amount <= self.num_workers \
         and self.command_center.noqueue:
             await self.do(self.command_center.train(SCV))
 
     async def manage_supply(self):
-        supply_threshold = 2 if self.barracks.amount < 3 else 4
+        min_depots = int(self.num_workers/5)
+        supply_threshold = min_depots if self.barracks.amount < 3 else min_depots + 2
 
         if self.supply_left < supply_threshold and \
         self.can_afford(SUPPLYDEPOT) and self.already_pending(SUPPLYDEPOT) < 2:
@@ -131,8 +161,9 @@ class ProxyRaxRushBot(sc2.BotAI):
             ]).ready.exists:
             return   
 
-        if self.barracks.amount < 3 or \
-        (self.barracks.amount < 5 and self.minerals > 400):
+        if self.barracks.amount < self.num_barracks:
+        # if self.barracks.amount < 3 or \
+        # (self.barracks.amount < 5 and self.minerals > 400):
             if self.can_afford(BARRACKS):
                 game_info = self.game_info
                 position = game_info.map_center.towards(
@@ -162,7 +193,8 @@ class ProxyRaxRushBot(sc2.BotAI):
                     attack_wave = ControlGroup(units.idle)
                 else:
                     attack_wave.add_units(units.idle)
-        if attack_wave is not None and 0 < len(attack_wave) > 12:
+        if attack_wave is not None \
+        and self.attack_wave_threshold < len(attack_wave):
             self.attack_waves.add(attack_wave)
 
     async def attack(self):
