@@ -1,6 +1,5 @@
 import sc2
-from sc2 import BotAI
-from sc2 import Race, Difficulty
+from sc2 import BotAI, Race, Difficulty, Result
 from sc2.constants import *
 from sc2.helpers import ControlGroup
 from sc2.player import Bot, Computer
@@ -9,21 +8,21 @@ import cv2 as cv
 import numpy as np
 
 import random
+from time import time
 
 ITERATIONS_PER_MINUTE = 165
+NUM_EPISODES = 15 # TODO: increase
 
 class ProxyRaxRushBot(sc2.BotAI):
 
     def __init__(self):
         # Parameters to randomly train on
-        self.num_workers = random.randrange(12, 26)
         self.num_marines = random.randrange(1, 25)
         self.attack_interval_seconds = random.randrange(8, 40)
         self.attack_wave_threshold = random.randrange(0, 20)
-        self.num_barracks = random.randrange(1, 6)
+        self.num_barracks = random.randrange(2, 8)
 
         print('--- Parameters ---')
-        print(f'num workers = {self.num_workers}')
         print(f'num marines = {self.num_marines}')
         print(f'interval attack = {self.attack_interval_seconds}')
         print(f'threshold attack = {self.attack_wave_threshold}')
@@ -31,7 +30,6 @@ class ProxyRaxRushBot(sc2.BotAI):
         print('------------------')
 
         self.parameters = [
-            self.num_workers, 
             self.num_marines, 
             self.attack_interval_seconds, 
             self.attack_wave_threshold,
@@ -105,8 +103,6 @@ class ProxyRaxRushBot(sc2.BotAI):
         cv.imshow('Map', cv.resize(flipped, dsize=None, fx=2, fy=2))
         cv.waitKey(1)
 
-
-
     async def visualize_map(self, game_map):
         # game coordinates need to be represented as (y, x) in 2d arrays
         for typ, intel in self.unit_intel.items():
@@ -139,19 +135,26 @@ class ProxyRaxRushBot(sc2.BotAI):
         cv.line(game_map, (0, 0),  (int(line_scalar*military), 0), (0, 0, 255), 2)
 
     async def manage_workers(self):
-        if self.can_afford(SCV) and self.workers.amount <= self.num_workers \
+        if self.can_afford(SCV) and self.workers.amount <= 15 \
         and self.command_center.noqueue:
             await self.do(self.command_center.train(SCV))
 
     async def manage_supply(self):
-        min_depots = int(self.num_workers/5)
-        supply_threshold = min_depots if self.barracks.amount < 3 else min_depots + 2
+        supply_threshold = 2 if self.barracks.amount < 3 else 5
 
-        if self.supply_left < supply_threshold and \
-        self.can_afford(SUPPLYDEPOT) and self.already_pending(SUPPLYDEPOT) < 2:
-            position = self.command_center.position.towards(
-                self.game_info.map_center, 5)
-            await self.build(SUPPLYDEPOT, position)
+        supply_units = self.units.of_type([
+            SUPPLYDEPOT, 
+            SUPPLYDEPOTLOWERED, 
+            SUPPLYDEPOTDROP
+        ])
+
+        if self.can_afford(SUPPLYDEPOT):
+            if supply_units.amount < 1 or \
+            (self.supply_left < supply_threshold and 
+                self.already_pending(SUPPLYDEPOT) < 2):
+                position = self.command_center.position.towards(
+                    self.game_info.map_center, 5)
+                await self.build(SUPPLYDEPOT, position)
 
     async def manage_military_training_structures(self): 
         if not self.units.of_type([
@@ -250,15 +253,14 @@ class ProxyRaxRushBot(sc2.BotAI):
         """
         Grabs the seconds currently elapsed.
         """
-        return self.iteration / (ITERATIONS_PER_MINUTE / 60)
+        return self.minutes_elapsed * 60
 
+for _ in range(NUM_EPISODES):
+    bot = ProxyRaxRushBot()
+    result = sc2.run_game(sc2.maps.get("(2)RedshiftLE"), [
+        Bot(Race.Terran, bot),
+        Computer(Race.Protoss, Difficulty.VeryHard)
+        ], realtime=False)
 
-# Can beat elite protoss and terran AI with ease
-# Loses occasionally to elite early zergling/roach push
-result = sc2.run_game(sc2.maps.get("(2)RedshiftLE"), [
-    Bot(Race.Terran, ProxyRaxRushBot()),
-    Computer(Race.Protoss, Difficulty.VeryHard)
-    ], realtime=False)
-
-print("----")
-print(result)
+    if result == Result.Victory:
+        np.save(f'training/{int(time())}.npy', np.array((bot.parameters, bot.states)))
