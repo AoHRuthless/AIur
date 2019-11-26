@@ -11,44 +11,30 @@ import random
 from time import time
 
 ITERATIONS_PER_MINUTE = 165
-NUM_EPISODES = 15 # TODO: increase
+NUM_EPISODES = 1300
+TRAIN_DIR = "training2"
+VISUALIZE = False
 
 class ProxyRaxRushBot(sc2.BotAI):
 
     def __init__(self):
-        # Parameters to randomly train on
-        self.num_marines = random.randrange(1, 25)
-        self.attack_interval_seconds = random.randrange(8, 40)
-        self.attack_wave_threshold = random.randrange(0, 20)
-        self.num_barracks = random.randrange(2, 8)
-
-        print('--- Parameters ---')
-        print(f'num marines = {self.num_marines}')
-        print(f'interval attack = {self.attack_interval_seconds}')
-        print(f'threshold attack = {self.attack_wave_threshold}')
-        print(f'num barracks = {self.num_barracks}')
-        print('------------------')
-
-        self.parameters = [
-            self.num_marines, 
-            self.attack_interval_seconds, 
-            self.attack_wave_threshold,
-            self.num_barracks
-        ]
         self.states = []
 
     async def on_step(self, iteration):
         self.iteration = iteration
         self.attack_waves = set()
 
+        self.sample = random.randrange(4)
+
         if not self.townhalls.exists:
             for unit in self.workers | self.marines:
-                await self.do(unit.attack(self.target))
+                if self.target:
+                    await self.do(unit.attack(self.target))
             return
         self.command_center = self.townhalls.first
 
         military = {
-            MARINE: self.num_marines
+            MARINE: 15
         }
 
         # note that colors are in BGR representation
@@ -82,7 +68,7 @@ class ProxyRaxRushBot(sc2.BotAI):
             DRONE: [1, (34, 237, 200), "drone"]
         }
 
-        self.prepare_attack(military, interval=self.attack_interval_seconds)
+        self.prepare_attack(military)
         await self.manage_workers()
         await self.manage_supply()
         await self.manage_military_training_structures()
@@ -98,10 +84,14 @@ class ProxyRaxRushBot(sc2.BotAI):
 
         # cv assumes (0, 0) top-left => need to flip along horizontal axis
         flipped = cv.flip(game_map, 0)
-        self.states.append(flipped)
+        params = np.zeros(4)
+        params[self.sample] = 1
 
-        cv.imshow('Map', cv.resize(flipped, dsize=None, fx=2, fy=2))
-        cv.waitKey(1)
+        self.states.append([params, flipped])
+
+        if VISUALIZE:
+            cv.imshow('Map', cv.resize(flipped, dsize=None, fx=2, fy=2))
+            cv.waitKey(1)
 
     async def visualize_map(self, game_map):
         # game coordinates need to be represented as (y, x) in 2d arrays
@@ -164,27 +154,21 @@ class ProxyRaxRushBot(sc2.BotAI):
             ]).ready.exists:
             return   
 
-        if self.barracks.amount < self.num_barracks:
-        # if self.barracks.amount < 3 or \
-        # (self.barracks.amount < 5 and self.minerals > 400):
+        if self.barracks.amount < 3 or \
+        (self.barracks.amount < 6 and self.minerals > 400):
             if self.can_afford(BARRACKS):
                 game_info = self.game_info
                 position = game_info.map_center.towards(
                     self.enemy_start_locations[0], 25)
                 await self.build(BARRACKS, near=position)
 
-    def prepare_attack(self, military_ratio, interval=10):
+    def prepare_attack(self, military_ratio):
         """
-        Prepares an attack wave every interval when ready. Attack waves are 
-        comprised of military units specified by the given ratio.
+        Prepares an attack wave when ready.
 
         :param military_ratio: <dict> [UnitId: int] specifying military 
         composition.
-        :param interval: <int> time interval in seconds to prepare a wave.
         """
-
-        if self.seconds_elapsed % interval != 0:
-            return
 
         attack_wave = None
         for unit in military_ratio:
@@ -196,8 +180,7 @@ class ProxyRaxRushBot(sc2.BotAI):
                     attack_wave = ControlGroup(units.idle)
                 else:
                     attack_wave.add_units(units.idle)
-        if attack_wave is not None \
-        and self.attack_wave_threshold < len(attack_wave):
+        if attack_wave is not None:
             self.attack_waves.add(attack_wave)
 
     async def attack(self):
@@ -205,12 +188,15 @@ class ProxyRaxRushBot(sc2.BotAI):
         Sends any attack group out to target. No micro is done on the army 
         dispatch.
         """
+        if self.sample == 0:
+            return
 
         for wave in list(self.attack_waves):
             alive_units = wave.select_units(self.units)
             if alive_units.exists and alive_units.idle.exists:
-                for unit in wave.select_units(self.units):
-                    await self.do(unit.attack(self.target))
+                if self.target:
+                    for unit in wave.select_units(self.units):
+                        await self.do(unit.attack(self.target))
             else:
                 self.attack_waves.remove(wave)
 
@@ -230,8 +216,12 @@ class ProxyRaxRushBot(sc2.BotAI):
         """
         Seeks a random enemy structure or prioritizes the start location
         """
-        return self.known_enemy_structures.random_or(self.
-            enemy_start_locations[0]).position
+        if self.sample == 1 and len(self.known_enemy_structures) > 0:
+            return random.choice(self.known_enemy_structures).position
+        elif self.sample == 2 and len(self.known_enemy_units) > 0 and self.townhalls.exists:
+            return self.known_enemy_units.closest_to(random.choice(self.townhalls)).position
+        elif self.sample == 3:
+            return self.enemy_start_locations[0].position
 
     @property
     def barracks(self):
@@ -263,4 +253,4 @@ for _ in range(NUM_EPISODES):
         ], realtime=False)
 
     if result == Result.Victory:
-        np.save(f'training/{int(time())}.npy', np.array((bot.parameters, bot.states)))
+        np.save(f'{TRAIN_DIR}/{int(time())}.npy', np.array(bot.states))
