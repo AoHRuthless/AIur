@@ -12,7 +12,7 @@ from time import time
 
 ITERATIONS_PER_MINUTE = 165
 NUM_EPISODES = 1300
-TRAIN_DIR = "training2"
+TRAIN_DIR = "training"
 VISUALIZE = False
 
 class ProxyRaxRushBot(sc2.BotAI):

@@ -7,7 +7,7 @@ import os
 import numpy as np
 import random
 
-TRAIN_DIR = "training2"
+TRAIN_DIR = "training"
 
 # https://stackoverflow.com/questions/55890813/how-to-fix-object-arrays-cannot-be-loaded-when-allow-pickle-false-for-imdb-loa/56243777
 # save np load
