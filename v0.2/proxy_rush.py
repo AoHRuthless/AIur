@@ -6,25 +6,36 @@ from sc2.player import Bot, Computer
 
 import cv2 as cv
 import numpy as np
+import keras
 
 import random
 from time import time
 
 ITERATIONS_PER_MINUTE = 165
-NUM_EPISODES = 1300
+NUM_EPISODES = 100
 TRAIN_DIR = "training"
 VISUALIZE = False
 
 class ProxyRaxRushBot(sc2.BotAI):
 
-    def __init__(self):
+    def __init__(self, training=True):
         self.states = []
+        self.training = training
+        self.flipped = None
+        self.next_actionable = 0
+
+        if not self.training:
+            self.model = keras.models.load_model("CNN-10-epoch-0.0001-alpha")
 
     async def on_step(self, iteration):
         self.iteration = iteration
         self.attack_waves = set()
 
-        self.sample = random.randrange(4)
+        if self.training or self.flipped is None:
+            self.action = random.randrange(4)
+        else:
+            prediction = self.model.predict([self.flipped.reshape([-1, 184, 152, 3])])
+            self.action = np.argmax(prediction[0])
 
         if not self.townhalls.exists:
             for unit in self.workers | self.marines:
@@ -68,6 +79,9 @@ class ProxyRaxRushBot(sc2.BotAI):
             DRONE: [1, (34, 237, 200), "drone"]
         }
 
+        # if self.iteration < self.next_actionable:
+        #     return
+
         self.prepare_attack(military)
         await self.manage_workers()
         await self.manage_supply()
@@ -83,14 +97,15 @@ class ProxyRaxRushBot(sc2.BotAI):
         await self.visualize_resources(game_map)
 
         # cv assumes (0, 0) top-left => need to flip along horizontal axis
-        flipped = cv.flip(game_map, 0)
+        self.flipped = cv.flip(game_map, 0)
         params = np.zeros(4)
-        params[self.sample] = 1
+        params[self.action] = 1
 
-        self.states.append([params, flipped])
+        self.states.append([params, self.flipped])
 
         if VISUALIZE:
-            cv.imshow('Map', cv.resize(flipped, dsize=None, fx=2, fy=2))
+            key = 'Training Map' if self.training else 'Model Map'
+            cv.imshow(key, cv.resize(flipped, dsize=None, fx=2, fy=2))
             cv.waitKey(1)
 
     async def visualize_map(self, game_map):
@@ -188,7 +203,8 @@ class ProxyRaxRushBot(sc2.BotAI):
         Sends any attack group out to target. No micro is done on the army 
         dispatch.
         """
-        if self.sample == 0:
+        if self.action == 0:
+            # self.next_actionable = self.iteration + random.randrange(20, 100)
             return
 
         for wave in list(self.attack_waves):
@@ -216,11 +232,11 @@ class ProxyRaxRushBot(sc2.BotAI):
         """
         Seeks a random enemy structure or prioritizes the start location
         """
-        if self.sample == 1 and len(self.known_enemy_structures) > 0:
+        if self.action == 1 and len(self.known_enemy_structures) > 0:
             return random.choice(self.known_enemy_structures).position
-        elif self.sample == 2 and len(self.known_enemy_units) > 0 and self.townhalls.exists:
+        elif self.action == 2 and len(self.known_enemy_units) > 0 and self.townhalls.exists:
             return self.known_enemy_units.closest_to(random.choice(self.townhalls)).position
-        elif self.sample == 3:
+        elif self.action == 3:
             return self.enemy_start_locations[0].position
 
     @property
@@ -246,7 +262,8 @@ class ProxyRaxRushBot(sc2.BotAI):
         return self.minutes_elapsed * 60
 
 for _ in range(NUM_EPISODES):
-    bot = ProxyRaxRushBot()
+    training = False
+    bot = ProxyRaxRushBot(training=training)
     result = sc2.run_game(sc2.maps.get("(2)RedshiftLE"), [
         Bot(Race.Terran, bot),
         Computer(Race.Protoss, Difficulty.VeryHard)
@@ -254,3 +271,9 @@ for _ in range(NUM_EPISODES):
 
     if result == Result.Victory:
         np.save(f'{TRAIN_DIR}/{int(time())}.npy', np.array(bot.states))
+
+    with open("results.log", "a") as log:
+        if training:
+            log.write(f"Training = {result}\n")
+        else:
+            log.write(f"Model = {result}\n")
