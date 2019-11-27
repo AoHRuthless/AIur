@@ -61,17 +61,27 @@ class TerranBot(sc2.BotAI):
         if not self.training:
             self.model = keras.models.load_model("CNN-10-epoch-0.0001-alpha")
 
+        self.actions = [
+            self.standby,
+            self.attack,
+            self.attack,
+            self.attack,
+            self.manage_supply,
+            self.manage_barracks,
+            self.train_workers,
+            self.train_marines,
+        ]
+        self.num_actions = len(self.actions)
+
     async def on_step(self, iteration):
         self.seconds_elapsed = self.state.game_loop / TIME_SCALAR
         self.minutes_elapsed = self.seconds_elapsed / SECONDS_PER_MIN
         self.attack_waves = set()
 
-        self.action = self.choose_action()
-
         if not self.townhalls.exists:
+            target = self.known_enemy_structures.random_or(self.enemy_start_locations[0]).position
             for unit in self.workers | self.marines:
-                if self.target:
-                    await self.do(unit.attack(self.target))
+                await self.do(unit.attack(target))
             return
         self.command_center = self.townhalls.first
 
@@ -79,17 +89,14 @@ class TerranBot(sc2.BotAI):
             MARINE: 15
         }
 
+        self.action = self.make_action_selection()
+        print(f"Action chosen == {self.action}")
         self.prepare_attack(military)
-        await self.scout()
-        await self.manage_workers()
-        await self.manage_supply()
-        await self.manage_military_training_structures()
-        await self.train_military()
-        await self.visualize()
-        await self.task_workers()
 
-        if self.minutes_elapsed > self.next_actionable:
-            await self.attack()
+        await self.task_workers()
+        await self.scout()
+        await self.visualize()
+        await self.take_action()
 
     async def visualize(self):
         game_map = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
@@ -98,7 +105,7 @@ class TerranBot(sc2.BotAI):
 
         # cv assumes (0, 0) top-left => need to flip along horizontal axis
         self.flipped = cv.flip(game_map, 0)
-        params = np.zeros(4)
+        params = np.zeros(self.num_actions)
         params[self.action] = 1
 
         self.states.append([params, self.flipped])
@@ -139,7 +146,7 @@ class TerranBot(sc2.BotAI):
         cv.line(game_map, (0, 4),  (int(line_scalar*supply_usage), 4), (64, 64, 64), 2)
         cv.line(game_map, (0, 0),  (int(line_scalar*military), 0), (0, 0, 255), 2)
 
-    async def manage_workers(self):
+    async def train_workers(self):
         if self.can_afford(SCV) and self.workers.amount <= 15 \
         and self.command_center.noqueue:
             await self.do(self.command_center.train(SCV))
@@ -216,7 +223,7 @@ class TerranBot(sc2.BotAI):
                     self.game_info.map_center, 5)
                 await self.build(SUPPLYDEPOT, position)
 
-    async def manage_military_training_structures(self): 
+    async def manage_barracks(self): 
         if not self.units.of_type([
             SUPPLYDEPOT, 
             SUPPLYDEPOTLOWERED, 
@@ -224,13 +231,13 @@ class TerranBot(sc2.BotAI):
             ]).ready.exists:
             return   
 
-        if self.barracks.amount < 3 or \
-        (self.barracks.amount < 5 and self.minerals > 400):
-            if self.can_afford(BARRACKS):
-                game_info = self.game_info
-                position = game_info.map_center.towards(
-                    self.enemy_start_locations[0], 25)
-                await self.build(BARRACKS, near=position)
+        # if self.barracks.amount < 3 or \
+        # (self.barracks.amount < 5 and self.minerals > 400):
+        if self.can_afford(BARRACKS):
+            game_info = self.game_info
+            position = game_info.map_center.towards(
+                self.enemy_start_locations[0], 25)
+            await self.build(BARRACKS, near=position)
 
     def prepare_attack(self, military_ratio):
         """
@@ -253,21 +260,36 @@ class TerranBot(sc2.BotAI):
         if attack_wave is not None:
             self.attack_waves.add(attack_wave)
 
+    async def standby(self):
+        self.next_actionable = self.seconds_elapsed + random.randrange(1, 15)
+
     async def attack(self):
         """
         Sends any attack group out to target. No micro is done on the army 
         dispatch.
         """
-        if self.action == 0:
-            self.next_actionable = self.minutes_elapsed + random.randrange(7, 77) / 100
+
+        target = None 
+        if self.action == 1:
+            if len(self.known_enemy_structures) > 0:
+                target = random.choice(self.known_enemy_structures).position
+        elif self.action == 2:
+            if len(self.known_enemy_units) > 0:
+                target = self.known_enemy_units.closest_to(random.choice(self.townhalls)).position
+        elif self.action == 3:
+            target = self.enemy_start_locations[0].position
+        else:
             return
+
+        if target is None:
+            return
+
 
         for wave in list(self.attack_waves):
             alive_units = wave.select_units(self.units)
             if alive_units.exists and alive_units.idle.exists:
-                if self.target:
-                    for unit in wave.select_units(self.units):
-                        await self.do(unit.attack(self.target))
+                for unit in wave.select_units(self.units):
+                    await self.do(unit.attack(target))
             else:
                 self.attack_waves.remove(wave)
 
@@ -276,30 +298,30 @@ class TerranBot(sc2.BotAI):
         for scv in self.workers.idle:
             await self.do(scv.gather(min_field))
 
-    async def train_military(self):
+    async def train_marines(self):
         for rax in self.barracks.ready.noqueue:
             if not self.can_afford(MARINE):
                 break
             await self.do(rax.train(MARINE))
 
-    @property
-    def target(self):
-        """
-        Seeks a random enemy structure or prioritizes the start location
-        """
-        if self.action == 1 and len(self.known_enemy_structures) > 0:
-            return random.choice(self.known_enemy_structures).position
-        elif self.action == 2 and len(self.known_enemy_units) > 0 and self.townhalls.exists:
-            return self.known_enemy_units.closest_to(random.choice(self.townhalls)).position
-        elif self.action == 3:
-            return self.enemy_start_locations[0].position
+    def make_action_selection(self):
+        if self.seconds_elapsed <= self.next_actionable:
+            return
 
-    def choose_action(self):
         if self.training or self.flipped is None:
-            return random.randrange(4)
+            return random.randrange(self.num_actions)
         else:
             prediction = self.model.predict([self.flipped.reshape([-1, 184, 152, 3])])
             return np.argmax(prediction[0])
+
+    async def take_action(self):
+        if self.seconds_elapsed <= self.next_actionable:
+            return
+
+        try:
+            await self.actions[self.action]()
+        except Exception as err:
+            print(str(err))
 
     @property
     def barracks(self):
