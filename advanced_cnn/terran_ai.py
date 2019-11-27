@@ -60,7 +60,7 @@ class TerranBot(sc2.BotAI):
             self.model = keras.models.load_model("CNN-10-epoch-0.0001-alpha")
 
     async def on_step(self, iteration):
-        self.tick = self.state.game_loop / TIME_SCALAR
+        self.minutes_elapsed = self.state.game_loop / TIME_SCALAR
         self.attack_waves = set()
 
         self.action = self.choose_action()
@@ -84,7 +84,7 @@ class TerranBot(sc2.BotAI):
         await self.visualize()
         await self.task_workers()
 
-        if self.tick > self.next_actionable:
+        if self.minutes_elapsed > self.next_actionable:
             await self.attack()
 
     async def visualize(self):
@@ -200,7 +200,7 @@ class TerranBot(sc2.BotAI):
         dispatch.
         """
         if self.action == 0:
-            self.next_actionable = self.tick + random.randrange(7, 77) / 100
+            self.next_actionable = self.minutes_elapsed + random.randrange(7, 77) / 100
             return
 
         for wave in list(self.attack_waves):
