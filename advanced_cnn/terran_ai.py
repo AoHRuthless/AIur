@@ -1,5 +1,5 @@
 import sc2
-from sc2 import BotAI, Race, Difficulty, Result
+from sc2 import BotAI, Race, Difficulty, Result, position
 from sc2.constants import *
 from sc2.helpers import ControlGroup
 from sc2.player import Bot, Computer
@@ -11,7 +11,8 @@ import keras
 import random
 from time import time
 
-TIME_SCALAR = 22.4 * 60
+TIME_SCALAR = 22.4
+SECONDS_PER_MIN = 60
 NUM_EPISODES = 100
 TRAIN_DIR = "training"
 VISUALIZE = False
@@ -55,12 +56,14 @@ class TerranBot(sc2.BotAI):
         self.training = training
         self.flipped = None
         self.next_actionable = 0
+        self.scout_locations = {}
 
         if not self.training:
             self.model = keras.models.load_model("CNN-10-epoch-0.0001-alpha")
 
     async def on_step(self, iteration):
-        self.minutes_elapsed = self.state.game_loop / TIME_SCALAR
+        self.seconds_elapsed = self.state.game_loop / TIME_SCALAR
+        self.minutes_elapsed = self.seconds_elapsed / SECONDS_PER_MIN
         self.attack_waves = set()
 
         self.action = self.choose_action()
@@ -77,6 +80,7 @@ class TerranBot(sc2.BotAI):
         }
 
         self.prepare_attack(military)
+        await self.scout()
         await self.manage_workers()
         await self.manage_supply()
         await self.manage_military_training_structures()
@@ -139,6 +143,61 @@ class TerranBot(sc2.BotAI):
         if self.can_afford(SCV) and self.workers.amount <= 15 \
         and self.command_center.noqueue:
             await self.do(self.command_center.train(SCV))
+
+    async def scout(self):
+        if self.seconds_elapsed % 2 == 0 or self.minutes_elapsed > 5:
+            return
+        expand_distances = {}
+
+        for el in self.expansion_locations:
+            distance_to_enemy_start = el.distance_to(self.enemy_start_locations[0])
+            expand_distances[distance_to_enemy_start] = el
+
+        distance_keys = sorted(k for k in expand_distances)
+        unit_tags = [unit.tag for unit in self.units]
+
+        to_be_removed = []
+        for s in self.scout_locations:
+            if s not in unit_tags:
+                to_be_removed.append(s)
+
+        for scout in to_be_removed:
+            del self.scout_locations[scout]
+
+        assign_scout = True
+
+        for unit in self.workers:
+            if unit.tag in self.scout_locations:
+                assign_scout = False
+
+        if assign_scout:
+            workers = self.workers.idle if len(self.workers.idle) > 0 else self.workers.gathering
+            for worker in workers[:1]:
+                if worker.tag not in self.scout_locations:
+                    for dist in distance_keys:
+                        try:
+                            location = next(v for k, v in expand_distances.items() if k == dist)
+                            active_locations = [self.scout_locations[k] for k in self.scout_locations]
+
+                            if location not in active_locations:
+                                await self.do(worker.move(location))
+                                self.scout_locations[worker.tag] = location
+                                break
+                        except Exception as e:
+                            pass
+
+        for worker in self.workers:
+            if worker.tag in self.scout_locations:
+                await self.do(worker.move(self.vary_loc(self.scout_locations[worker.tag])))
+
+    def vary_loc(self, location):
+        x = location[0] + random.randrange(-10, 10)
+        y = location[1] + random.randrange(-10, 10)
+
+        x = min(self.game_info.map_size[0], max(x, 0))
+        y = min(self.game_info.map_size[1], max(y, 0))
+
+        return position.Point2(position.Pointlike((x,y)))
 
     async def manage_supply(self):
         supply_threshold = 2 if self.barracks.amount < 3 else 5
@@ -214,7 +273,7 @@ class TerranBot(sc2.BotAI):
 
     async def task_workers(self):
         min_field = self.state.mineral_field.closest_to(self.command_center)
-        for scv in self.units(SCV).idle:
+        for scv in self.workers.idle:
             await self.do(scv.gather(min_field))
 
     async def train_military(self):
