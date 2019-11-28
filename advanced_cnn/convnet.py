@@ -45,7 +45,7 @@ class Model:
         self.model.add(Dropout(0.5))
 
         # output layer
-        self.model.add(Dense(4, activation='softmax'))
+        self.model.add(Dense(25, activation='softmax'))
 
         # compilation settings
         self.alpha = 1e-4
@@ -77,7 +77,10 @@ class Model:
                 attack_enemy_units = []
                 attack_enemy_start = []
 
-                lengths = [0, 0, 0, 0]
+                lengths = [0 for x in range(25)]
+                actions = {}
+                for x in range(25):
+                    actions[x] = []
 
                 for file in files[index:index+step_size]:
                     path = os.path.join(TRAIN_DIR, file)
@@ -85,29 +88,14 @@ class Model:
                     for d in data:
                         choice = np.argmax(d[0])
                         lengths[choice] += 1
-                        if choice == 0:
-                            attack_none.append(d)
-                        elif choice == 1:
-                            attack_enemy_structures.append(d)
-                        elif choice == 2:
-                            attack_enemy_units.append(d)
-                        elif choice == 3:
-                            attack_enemy_start.append(d)
-
-                random.shuffle(attack_none)
-                random.shuffle(attack_enemy_structures)
-                random.shuffle(attack_enemy_units)
-                random.shuffle(attack_enemy_start)
+                        actions[choice].append(d)
 
                 min_choice = min(lengths)
+                training = []
 
-                attack_none = attack_none[:min_choice]
-                attack_enemy_structures = attack_enemy_structures[:min_choice]
-                attack_enemy_units = attack_enemy_units[:min_choice]
-                attack_enemy_start = attack_enemy_start[:min_choice]
-
-                training = attack_none + attack_enemy_structures \
-                + attack_enemy_units + attack_enemy_start
+                for choice, data in actions.items():
+                    random.shuffle(data)
+                    training += data[:min_choice]
 
                 random.shuffle(training)
 
