@@ -8,6 +8,7 @@ import cv2 as cv
 import numpy as np
 import keras
 
+import math
 import random
 from time import time
 
@@ -33,11 +34,17 @@ UNIT_REPRESENTATION = {
     ASSIMILATOR: [3, (100, 100, 100), "assimilator"],
 
     BARRACKS: [5, (200, 40, 0), "barracks"],
+    FACTORY: [5, (175, 45, 40), "factory"],
+    STARPORT: [5, (128, 32, 32), "starport"],
+
     GATEWAY: [5, (200, 40, 0), "gateway"],
     CYBERNETICSCORE: [5, (175, 45, 40), "cyberneticscore"],
-    ROBOTICSFACILITY: [5, (128, 32, 32), "cyberneticscore"],
+    ROBOTICSFACILITY: [5, (128, 32, 32), "roboticsfacility"],
 
     MARINE: [1, (0, 0, 240), "marine"],
+    MARAUDER: [1, (0, 75, 215), "marauder"],
+    HELLION: [1, (0, 50, 149), "hellion"],
+    MEDIVAC: [1, (0, 128, 124), "medivac"],
 
     ZEALOT: [1, (0, 0, 240), "zealot"],
     ZERGLING: [1, (0, 0, 240), "zergling"],
@@ -51,7 +58,7 @@ UNIT_REPRESENTATION = {
 
 class TerranBot(sc2.BotAI):
 
-    def __init__(self, training=True):
+    def __init__(self, training=True, weights=None):
         self.states = []
         self.training = training
         self.flipped = None
@@ -61,16 +68,35 @@ class TerranBot(sc2.BotAI):
         if not self.training:
             self.model = keras.models.load_model("CNN-10-epoch-0.0001-alpha")
 
-        self.actions = [
+        actions_unweighted = [
             self.standby,
             self.attack,
-            self.attack,
-            self.attack,
             self.manage_supply,
+            # self.adjust_refinery_assignment,
+            self.manage_refineries,
             self.manage_barracks,
+            self.manage_barracks_tech_labs,
+            self.manage_barracks_reactors,
+            # self.manage_factories,
+            # self.manage_starports,
             self.train_workers,
             self.train_marines,
+            self.train_marauders,
+            # self.train_hellions,
+            # self.train_medivacs,
+            self.upgrade_cc,
+            self.expand,
         ]
+
+        if weights is None:
+            weights = [1, 3, 1, 1, 2, 1, 1, 3, 5, 2, 1, 4]
+
+        self.actions = []
+        if len(weights) == len(actions_unweighted):
+            for idx, w in enumerate(weights):
+                for _ in range(w):
+                    self.actions.append(actions_unweighted[idx])
+
         self.num_actions = len(self.actions)
 
     async def on_step(self, iteration):
@@ -80,23 +106,225 @@ class TerranBot(sc2.BotAI):
 
         if not self.townhalls.exists:
             target = self.known_enemy_structures.random_or(self.enemy_start_locations[0]).position
-            for unit in self.workers | self.marines:
+            for unit in self.workers | self.marines | self.units(MARAUDER):
                 await self.do(unit.attack(target))
             return
         self.command_center = self.townhalls.first
 
         military = {
-            MARINE: 15
+            MARINE: 15,
+            MARAUDER: 6,
+            MEDIVAC: 1,
+            HELLION: 5
         }
 
         self.action = self.make_action_selection()
-        print(f"Action chosen == {self.action}")
-        self.prepare_attack(military)
 
-        await self.task_workers()
-        await self.scout()
+        # print(f"action chosen == {self.action}")
+        self.prepare_attack(military)
+        if len(list(self.attack_waves)) > 0 and self.units(MEDIVAC).idle.amount > 0:
+            alive_units = list(self.attack_waves)[0].select_units(self.units)
+            for med in self.units(MEDIVAC).idle:
+                await self.do(med.move(alive_units.first.position))
+
+        await self.distribute_workers()
+        await self.lower_depots()
+        # await self.scout()
         await self.visualize()
         await self.take_action()
+
+    async def standby(self):
+        self.next_actionable = self.seconds_elapsed + random.randrange(1, 30)
+
+    async def take_action(self):
+        if self.seconds_elapsed <= self.next_actionable:
+            return
+
+        try:
+            await self.actions[self.action]()
+        except Exception as err:
+            print(str(err))
+
+    def make_action_selection(self):
+        if self.seconds_elapsed <= self.next_actionable:
+            return
+
+        if self.training or self.flipped is None:
+            return random.randrange(self.num_actions)
+        else:
+            prediction = self.model.predict([self.flipped.reshape([-1, 184, 152, 3])])
+            return np.argmax(prediction[0])
+
+    #### WORKERS ####
+    #################
+
+    async def train_workers(self):
+        if not self.can_afford(SCV):
+            return
+
+        for cc in self.townhalls.ready.noqueue:
+            await self.do(cc.train(SCV))
+
+    async def manage_supply(self):
+        if self.can_afford(SUPPLYDEPOT) and self.supply_left < 10:
+            position = self.townhalls.ready.random.position.towards(
+                self.game_info.map_center, 5)
+            await self.build(SUPPLYDEPOT, position)
+
+    async def lower_depots(self):
+        for sd in self.units(SUPPLYDEPOT).ready:
+            await self.do(sd(MORPH_SUPPLYDEPOT_LOWER))
+
+    async def upgrade_cc(self):
+        if self.barracks.ready.exists and self.can_afford(ORBITALCOMMAND):
+            for cc in self.units(COMMANDCENTER).idle:
+                await self.do(cc(UPGRADETOORBITAL_ORBITALCOMMAND))
+
+    async def expand(self):
+        try:
+            if self.can_afford(COMMANDCENTER):
+                await self.expand_now(max_distance=100)
+        except Exception as err:
+            print(str(err))
+
+    async def manage_refineries(self):
+        for cc in self.units(COMMANDCENTER).ready:
+            vgs = self.state.vespene_geyser.closer_than(20.0, cc)
+            for vg in vgs:
+                if not self.can_afford(REFINERY):
+                    break
+                worker = self.select_build_worker(vg.position)
+                if worker is None:
+                    break
+                if not self.units(REFINERY).closer_than(2.0, vg).exists:
+                    await self.do(worker.build(REFINERY, vg))
+
+    async def adjust_refinery_assignment(self):
+        for r in self.units(REFINERY):
+            if r.assigned_harvesters < r.ideal_harvesters:
+                w = self.workers.closer_than(20.0, r)
+                if w.exists:
+                    await self.do(w.random.gather(r))
+
+    #### MILITARY ####
+    ##################
+
+    async def attack(self):
+        """
+        Sends any attack group out to target. No micro is done on the army 
+        dispatch.
+        """
+
+        target = None 
+        if self.action == 1:
+            if len(self.known_enemy_structures) > 0:
+                target = random.choice(self.known_enemy_structures).position
+        elif self.action == 2:
+            if len(self.known_enemy_units) > 0:
+                target = self.known_enemy_units.closest_to(random.choice(self.townhalls)).position
+        elif self.action == 3:
+            target = self.enemy_start_locations[0].position
+        else:
+            return
+
+        if target is None:
+            return
+
+        for wave in list(self.attack_waves):
+            alive_units = wave.select_units(self.units)
+            if alive_units.exists and alive_units.idle.exists:
+                for unit in wave.select_units(self.units):
+                    await self.do(unit.attack(target))
+            else:
+                self.attack_waves.remove(wave)
+
+    async def manage_barracks(self): 
+        if not self.depots.ready.exists:
+            return
+
+        if self.can_afford(BARRACKS) and self.barracks.amount < 5:
+            depot = self.depots.ready.random
+            await self.build(BARRACKS, near=depot)
+
+    async def manage_barracks_tech_labs(self):
+        rax = self.barracks.ready.noqueue.random
+        if rax.add_on_tag == 0:
+            await self.do(rax.build(BARRACKSTECHLAB))
+
+    async def manage_barracks_reactors(self):
+        rax = self.barracks.ready.noqueue.random
+        if rax.add_on_tag == 0:
+            await self.do(rax.build(BARRACKSREACTOR))
+
+    async def manage_factories(self): 
+        if not self.depots.ready.exists:
+            return
+        if not self.barracks.ready.exists:
+            return
+
+        if self.can_afford(FACTORY) and self.units(FACTORY).amount < 3:
+            depot = self.depots.ready.random
+            await self.build(FACTORY, near=depot)
+
+    async def manage_starports(self): 
+        if not self.depots.ready.exists:
+            return
+        if not self.barracks.ready.exists:
+            return
+        if not self.units(FACTORY).ready.exists:
+            return
+
+        if self.can_afford(STARPORT) and self.units(STARPORT).amount < 3:
+            depot = self.depots.ready.random
+            await self.build(STARPORT, near=depot)
+
+    async def train_marines(self):
+        for rax in self.barracks.ready:
+            if not self.can_afford(MARINE):
+                break
+            await self.do(rax.train(MARINE))
+
+    async def train_marauders(self):
+        for rax in self.barracks.ready:
+            if not self.can_afford(MARAUDER):
+                break
+            await self.do(rax.train(MARAUDER))
+
+    async def train_hellions(self):
+        for f in self.units(FACTORY).ready:
+            if not self.can_afford(HELLION):
+                break
+            await self.do(f.train(HELLION))
+
+    async def train_medivacs(self):
+        for sp in self.units(STARPORT).ready:
+            if not self.can_afford(MEDIVAC):
+                break
+            await self.do(sp.train(MEDIVAC))
+
+    def prepare_attack(self, max_per_group):
+        """
+        Prepares an attack wave when ready.
+
+        :param max_per_group: <dict> [UnitId: int] specifying military 
+        composition.
+        """
+
+        attack_wave = None
+        for unit in max_per_group:
+            amount = max_per_group[unit]
+            units = self.units(unit)
+
+            if units.idle.amount >= amount:
+                if attack_wave is None:
+                    attack_wave = ControlGroup(units.idle)
+                else:
+                    attack_wave.add_units(units.idle)
+        if attack_wave is not None:
+            self.attack_waves.add(attack_wave)
+
+    #### VISUALIZATION ####
+    #######################
 
     async def visualize(self):
         game_map = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
@@ -117,18 +345,14 @@ class TerranBot(sc2.BotAI):
 
     async def visualize_map(self, game_map):
         # game coordinates need to be represented as (y, x) in 2d arrays
-        for typ, intel in UNIT_REPRESENTATION.items():
-            for unit in self.units(typ).ready:
-                posn = unit.position
-                cv.circle(game_map, (int(posn[0]), int(posn[1])), intel[0], intel[1], -1)
-            for unit in self.known_enemy_units:
-                if unit.name.lower() != intel[2].lower():
-                    continue
-                posn = unit.position
-                x = posn[0]
-                y = posn[1]
-                l = intel[0] * 1.75
-                cv.rectangle(game_map, (int(x), int(y)), (int(x + l), int(y + l)), intel[1], -1)
+
+        for unit in self.units().ready:
+            posn = unit.position
+            cv.circle(game_map, (int(posn[0]), int(posn[1])), int(unit.radius*8), (0, 0, 255), math.ceil(int(unit.radius*0.5)))
+
+        for unit in self.known_enemy_units:
+            posn = unit.position
+            cv.circle(game_map, (int(posn[0]), int(posn[1])), int(unit.radius*8), (255, 0, 0), math.ceil(int(unit.radius*0.5)))
 
     async def visualize_resources(self, game_map):
         line_scalar = 40
@@ -137,7 +361,7 @@ class TerranBot(sc2.BotAI):
         pop_space = min(1.0, self.supply_left / self.supply_cap)
         supply_usage = self.supply_cap / 200
         military = (self.supply_cap - self.supply_left - self.workers.amount) \
-        / (self.supply_cap - self.supply_left)
+        / max(1, self.supply_cap - self.supply_left)
 
 
         cv.line(game_map, (0, 16), (int(line_scalar*minerals), 16), (255, 40, 37), 2)  
@@ -146,10 +370,8 @@ class TerranBot(sc2.BotAI):
         cv.line(game_map, (0, 4),  (int(line_scalar*supply_usage), 4), (64, 64, 64), 2)
         cv.line(game_map, (0, 0),  (int(line_scalar*military), 0), (0, 0, 255), 2)
 
-    async def train_workers(self):
-        if self.can_afford(SCV) and self.workers.amount <= 15 \
-        and self.command_center.noqueue:
-            await self.do(self.command_center.train(SCV))
+    #### SCOUTING ####
+    ##################
 
     async def scout(self):
         if self.seconds_elapsed % 2 == 0 or self.minutes_elapsed > 5:
@@ -206,122 +428,16 @@ class TerranBot(sc2.BotAI):
 
         return position.Point2(position.Pointlike((x,y)))
 
-    async def manage_supply(self):
-        supply_threshold = 2 if self.barracks.amount < 3 else 5
+    #### HELPERS ####
+    #################
 
-        supply_units = self.units.of_type([
+    @property
+    def depots(self):
+        return self.units.of_type([
             SUPPLYDEPOT, 
             SUPPLYDEPOTLOWERED, 
             SUPPLYDEPOTDROP
-        ])
-
-        if self.can_afford(SUPPLYDEPOT):
-            if supply_units.amount < 1 or \
-            (self.supply_left < supply_threshold and 
-                self.already_pending(SUPPLYDEPOT) < 2):
-                position = self.command_center.position.towards(
-                    self.game_info.map_center, 5)
-                await self.build(SUPPLYDEPOT, position)
-
-    async def manage_barracks(self): 
-        if not self.units.of_type([
-            SUPPLYDEPOT, 
-            SUPPLYDEPOTLOWERED, 
-            SUPPLYDEPOTDROP
-            ]).ready.exists:
-            return   
-
-        # if self.barracks.amount < 3 or \
-        # (self.barracks.amount < 5 and self.minerals > 400):
-        if self.can_afford(BARRACKS):
-            game_info = self.game_info
-            position = game_info.map_center.towards(
-                self.enemy_start_locations[0], 25)
-            await self.build(BARRACKS, near=position)
-
-    def prepare_attack(self, military_ratio):
-        """
-        Prepares an attack wave when ready.
-
-        :param military_ratio: <dict> [UnitId: int] specifying military 
-        composition.
-        """
-
-        attack_wave = None
-        for unit in military_ratio:
-            amount = military_ratio[unit]
-            units = self.units(unit)
-
-            if units.idle.amount >= amount:
-                if attack_wave is None:
-                    attack_wave = ControlGroup(units.idle)
-                else:
-                    attack_wave.add_units(units.idle)
-        if attack_wave is not None:
-            self.attack_waves.add(attack_wave)
-
-    async def standby(self):
-        self.next_actionable = self.seconds_elapsed + random.randrange(1, 15)
-
-    async def attack(self):
-        """
-        Sends any attack group out to target. No micro is done on the army 
-        dispatch.
-        """
-
-        target = None 
-        if self.action == 1:
-            if len(self.known_enemy_structures) > 0:
-                target = random.choice(self.known_enemy_structures).position
-        elif self.action == 2:
-            if len(self.known_enemy_units) > 0:
-                target = self.known_enemy_units.closest_to(random.choice(self.townhalls)).position
-        elif self.action == 3:
-            target = self.enemy_start_locations[0].position
-        else:
-            return
-
-        if target is None:
-            return
-
-
-        for wave in list(self.attack_waves):
-            alive_units = wave.select_units(self.units)
-            if alive_units.exists and alive_units.idle.exists:
-                for unit in wave.select_units(self.units):
-                    await self.do(unit.attack(target))
-            else:
-                self.attack_waves.remove(wave)
-
-    async def task_workers(self):
-        min_field = self.state.mineral_field.closest_to(self.command_center)
-        for scv in self.workers.idle:
-            await self.do(scv.gather(min_field))
-
-    async def train_marines(self):
-        for rax in self.barracks.ready.noqueue:
-            if not self.can_afford(MARINE):
-                break
-            await self.do(rax.train(MARINE))
-
-    def make_action_selection(self):
-        if self.seconds_elapsed <= self.next_actionable:
-            return
-
-        if self.training or self.flipped is None:
-            return random.randrange(self.num_actions)
-        else:
-            prediction = self.model.predict([self.flipped.reshape([-1, 184, 152, 3])])
-            return np.argmax(prediction[0])
-
-    async def take_action(self):
-        if self.seconds_elapsed <= self.next_actionable:
-            return
-
-        try:
-            await self.actions[self.action]()
-        except Exception as err:
-            print(str(err))
+            ])
 
     @property
     def barracks(self):
@@ -336,7 +452,7 @@ for _ in range(NUM_EPISODES):
     bot = TerranBot(training=training)
     result = sc2.run_game(sc2.maps.get("(2)RedshiftLE"), [
         Bot(Race.Terran, bot),
-        Computer(Race.Protoss, Difficulty.VeryHard)
+        Computer(Race.Protoss, Difficulty.Medium)
         ], realtime=False)
 
     if result == Result.Victory:
