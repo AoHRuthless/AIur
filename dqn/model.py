@@ -10,7 +10,7 @@ import random
 from collections import deque
 
 class DQNModel:
-    def __init__(self, action_space, gamma=0.98, eps=1.0, eps_min=0.01, eps_decay=0.995):
+    def __init__(self, action_space, gamma=0.99, eps=1.0, eps_min=0.01, eps_decay=0.995):
         self.memory = deque(maxlen=2000)
         self.gamma = gamma
         self.epsilon = eps
