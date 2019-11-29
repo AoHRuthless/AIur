@@ -457,20 +457,23 @@ class TerranBot(sc2.BotAI):
         return self.units(MARINE)
 
 epsilon = 1.0
-for episode in range(NUM_EPISODES):
-    bot = TerranBot(epsilon=epsilon)
-    result = sc2.run_game(sc2.maps.get("(2)RedshiftLE"), [
-        Bot(Race.Terran, bot),
-        Computer(Race.Protoss, Difficulty.Medium)
-        ], realtime=False)
+try:
+    for episode in range(NUM_EPISODES):
+        bot = TerranBot(epsilon=epsilon)
+        result = sc2.run_game(sc2.maps.get("(2)RedshiftLE"), [
+            Bot(Race.Terran, bot),
+            Computer(Race.Protoss, Difficulty.Medium)
+            ], realtime=False)
 
-    if result == Result.Victory:
-        bot.remember(reward=1000, done=True)
-    else:
-        bot.remember(reward=-1000, done=True)
+        if result == Result.Victory:
+            bot.remember(reward=1000, done=True)
+        else:
+            bot.remember(reward=-1000, done=True)
 
-    bot.dqn.save(f"{TRAIN_DIR}/terran-bot-dqn.h5")
-    epsilon = bot.dqn.epsilon
+        bot.dqn.save(f"{TRAIN_DIR}/terran-bot-dqn.h5")
+        epsilon = bot.dqn.epsilon
 
-    with open("results.log", "a") as log:
-        log.write(f"episode: {episode + 1}/{NUM_EPISODES}, epsilon: {epsilon:.2}, result: {result}\n")
+        with open("results.log", "a") as log:
+            log.write(f"episode: {episode + 1}/{NUM_EPISODES}, epsilon: {epsilon:.2}, result: {result}\n")
+except KeyboardInterrupt as err:
+    pass
