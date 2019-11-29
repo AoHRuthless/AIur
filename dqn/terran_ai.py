@@ -4,7 +4,7 @@ from sc2.constants import *
 from sc2.helpers import ControlGroup
 from sc2.player import Bot, Computer
 
-from convnet import DQNModel
+from model import DQNModel
 
 import cv2 as cv
 import numpy as np
@@ -61,7 +61,7 @@ UNIT_REPRESENTATION = {
 
 class TerranBot(sc2.BotAI):
 
-    def __init__(self, weights=None):
+    def __init__(self, epsilon=1.0, weights=None):
         self.next_actionable = 0
         self.scout_locations = {}
 
@@ -97,7 +97,7 @@ class TerranBot(sc2.BotAI):
 
         self.curr_state = None
         self.num_actions = len(self.actions)
-        self.dqn = DQNModel(self.actions)
+        self.dqn = DQNModel(self.actions, eps=epsilon)
         self.iteration = 0
 
     async def on_step(self, iteration):
@@ -178,7 +178,8 @@ class TerranBot(sc2.BotAI):
             await self.do(cc.train(SCV))
 
     async def manage_supply(self):
-        if self.can_afford(SUPPLYDEPOT) and self.supply_left < 10:
+        if self.can_afford(SUPPLYDEPOT) \
+        and self.supply_left < 10 and self.already_pending(SUPPLYDEPOT) < 2:
             position = self.townhalls.ready.random.position.towards(
                 self.game_info.map_center, 5)
             await self.build(SUPPLYDEPOT, position)
@@ -456,7 +457,8 @@ class TerranBot(sc2.BotAI):
         return self.units(MARINE)
 
 for episode in range(NUM_EPISODES):
-    bot = TerranBot()
+    epsilon = 1.0
+    bot = TerranBot(epsilon=epsilon)
     result = sc2.run_game(sc2.maps.get("(2)RedshiftLE"), [
         Bot(Race.Terran, bot),
         Computer(Race.Protoss, Difficulty.Medium)
@@ -468,6 +470,7 @@ for episode in range(NUM_EPISODES):
         bot.remember(reward=-1000, done=True)
 
     bot.dqn.save(f"{TRAIN_DIR}/terran-bot-dqn.h5")
+    epsilon = bot.dqn.epsilon
 
     with open("results.log", "a") as log:
-        log.write(f"episode: {episode + 1}/{NUM_EPISODES}, epsilon: {bot.dqn.epsilon:.2}, result: {result}\n")
+        log.write(f"episode: {episode + 1}/{NUM_EPISODES}, epsilon: {epsilon:.2}, result: {result}\n")
