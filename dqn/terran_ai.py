@@ -456,8 +456,8 @@ class TerranBot(sc2.BotAI):
     def marines(self):
         return self.units(MARINE)
 
+epsilon = 1.0
 for episode in range(NUM_EPISODES):
-    epsilon = 1.0
     bot = TerranBot(epsilon=epsilon)
     result = sc2.run_game(sc2.maps.get("(2)RedshiftLE"), [
         Bot(Race.Terran, bot),
