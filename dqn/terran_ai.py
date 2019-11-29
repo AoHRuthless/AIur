@@ -62,12 +62,8 @@ UNIT_REPRESENTATION = {
 class TerranBot(sc2.BotAI):
 
     def __init__(self, weights=None):
-        # self.training = training
         self.next_actionable = 0
         self.scout_locations = {}
-
-        # if not self.training:
-        #     self.model = keras.models.load_model("CNN-50-epoch-0.0001-alpha")
 
         actions_unweighted = [
             self.no_op,
@@ -165,13 +161,6 @@ class TerranBot(sc2.BotAI):
             return 0
 
         return self.dqn.choose_action(self.curr_state)
-
-        # if self.training or self.flipped is None:
-        #     return random.randrange(self.num_actions)
-        # else:
-        #     prediction = self.model.predict([self.flipped.reshape([-1, 184, 152, 3])])
-        #     # print(f"choice => {np.argmax(prediction[0])}")
-        #     return np.argmax(prediction[0])
 
     def remember(self, reward=None, done=False):
         if not reward:
@@ -478,7 +467,7 @@ for episode in range(NUM_EPISODES):
     else:
         bot.remember(reward=-1000, done=True)
 
-    bot.dqn.save("training/terran-bot-dqn.h5")
+    bot.dqn.save(f"{TRAIN_DIR}/terran-bot-dqn.h5")
 
     with open("results.log", "a") as log:
         log.write(f"episode: {episode + 1}/{NUM_EPISODES}, epsilon: {bot.dqn.epsilon:.2}, result: {result}\n")
