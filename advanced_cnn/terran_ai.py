@@ -4,6 +4,8 @@ from sc2.constants import *
 from sc2.helpers import ControlGroup
 from sc2.player import Bot, Computer
 
+from convnet import DQNModel
+
 import cv2 as cv
 import numpy as np
 import keras
@@ -17,6 +19,7 @@ SECONDS_PER_MIN = 60
 NUM_EPISODES = 100
 TRAIN_DIR = "training"
 VISUALIZE = False
+REPLAY_BATCH_SIZE = 32
 
 # note that colors are in BGR representation
 UNIT_REPRESENTATION = {
@@ -58,17 +61,16 @@ UNIT_REPRESENTATION = {
 
 class TerranBot(sc2.BotAI):
 
-    def __init__(self, training=True, weights=None):
-        self.states = []
-        self.training = training
-        self.flipped = None
+    def __init__(self, weights=None):
+        # self.training = training
         self.next_actionable = 0
         self.scout_locations = {}
 
-        if not self.training:
-            self.model = keras.models.load_model("CNN-10-epoch-0.0001-alpha")
+        # if not self.training:
+        #     self.model = keras.models.load_model("CNN-50-epoch-0.0001-alpha")
 
         actions_unweighted = [
+            self.no_op,
             self.standby,
             self.attack,
             self.manage_supply,
@@ -89,7 +91,7 @@ class TerranBot(sc2.BotAI):
         ]
 
         if weights is None:
-            weights = [1, 3, 1, 1, 2, 1, 1, 3, 5, 2, 1, 4]
+            weights = [1, 1, 3, 3, 1, 4, 1, 1, 3, 7, 2, 1, 4]
 
         self.actions = []
         if len(weights) == len(actions_unweighted):
@@ -97,19 +99,30 @@ class TerranBot(sc2.BotAI):
                 for _ in range(w):
                     self.actions.append(actions_unweighted[idx])
 
+        self.curr_state = None
         self.num_actions = len(self.actions)
+        self.dqn = DQNModel(self.actions)
+        self.iteration = 0
 
     async def on_step(self, iteration):
         self.seconds_elapsed = self.state.game_loop / TIME_SCALAR
         self.minutes_elapsed = self.seconds_elapsed / SECONDS_PER_MIN
         self.attack_waves = set()
+        self.iteration += 1
+
+        if self.curr_state is not None:
+            self.prev_state = self.curr_state
+            self.remember()
+            if self.iteration % REPLAY_BATCH_SIZE == 0:
+                self.dqn.replay(REPLAY_BATCH_SIZE)
+
+        await self.visualize()
 
         if not self.townhalls.exists:
             target = self.known_enemy_structures.random_or(self.enemy_start_locations[0]).position
             for unit in self.workers | self.marines | self.units(MARAUDER):
                 await self.do(unit.attack(target))
             return
-        self.command_center = self.townhalls.first
 
         military = {
             MARINE: 15,
@@ -122,16 +135,18 @@ class TerranBot(sc2.BotAI):
 
         # print(f"action chosen == {self.action}")
         self.prepare_attack(military)
-        if len(list(self.attack_waves)) > 0 and self.units(MEDIVAC).idle.amount > 0:
-            alive_units = list(self.attack_waves)[0].select_units(self.units)
-            for med in self.units(MEDIVAC).idle:
-                await self.do(med.move(alive_units.first.position))
+        # if len(list(self.attack_waves)) > 0 and self.units(MEDIVAC).idle.amount > 0:
+        #     alive_units = list(self.attack_waves)[0].select_units(self.units)
+        #     for med in self.units(MEDIVAC).idle:
+        #         await self.do(med.move(alive_units.first.position))
 
         await self.distribute_workers()
         await self.lower_depots()
         # await self.scout()
-        await self.visualize()
         await self.take_action()
+
+    async def no_op(self):
+        pass
 
     async def standby(self):
         self.next_actionable = self.seconds_elapsed + random.randrange(1, 30)
@@ -146,14 +161,22 @@ class TerranBot(sc2.BotAI):
             print(str(err))
 
     def make_action_selection(self):
-        if self.seconds_elapsed <= self.next_actionable:
-            return
+        if self.seconds_elapsed <= self.next_actionable or self.curr_state is None:
+            return 0
 
-        if self.training or self.flipped is None:
-            return random.randrange(self.num_actions)
-        else:
-            prediction = self.model.predict([self.flipped.reshape([-1, 184, 152, 3])])
-            return np.argmax(prediction[0])
+        return self.dqn.choose_action(self.curr_state)
+
+        # if self.training or self.flipped is None:
+        #     return random.randrange(self.num_actions)
+        # else:
+        #     prediction = self.model.predict([self.flipped.reshape([-1, 184, 152, 3])])
+        #     # print(f"choice => {np.argmax(prediction[0])}")
+        #     return np.argmax(prediction[0])
+
+    def remember(self, reward=None, done=False):
+        if not reward:
+            reward = self.state.score.score
+        self.dqn.remember(self.prev_state, self.action, reward, self.curr_state, done)
 
     #### WORKERS ####
     #################
@@ -216,13 +239,13 @@ class TerranBot(sc2.BotAI):
         """
 
         target = None 
-        if self.action == 1:
+        if self.action == 2:
             if len(self.known_enemy_structures) > 0:
                 target = random.choice(self.known_enemy_structures).position
-        elif self.action == 2:
+        elif self.action == 3:
             if len(self.known_enemy_units) > 0:
                 target = self.known_enemy_units.closest_to(random.choice(self.townhalls)).position
-        elif self.action == 3:
+        elif self.action == 4:
             target = self.enemy_start_locations[0].position
         else:
             return
@@ -332,16 +355,12 @@ class TerranBot(sc2.BotAI):
         await self.visualize_resources(game_map)
 
         # cv assumes (0, 0) top-left => need to flip along horizontal axis
-        self.flipped = cv.flip(game_map, 0)
-        params = np.zeros(self.num_actions)
-        params[self.action] = 1
-
-        self.states.append([params, self.flipped])
+        curr_state = cv.flip(game_map, 0)
 
         if VISUALIZE:
-            key = 'Training Map' if self.training else 'Model Map'
-            cv.imshow(key, cv.resize(flipped, dsize=None, fx=2, fy=2))
+            cv.imshow('Map', cv.resize(curr_state, dsize=None, fx=2, fy=2))
             cv.waitKey(1)
+        self.curr_state = curr_state.reshape([-1, 184, 152, 3])
 
     async def visualize_map(self, game_map):
         # game coordinates need to be represented as (y, x) in 2d arrays
@@ -447,19 +466,19 @@ class TerranBot(sc2.BotAI):
     def marines(self):
         return self.units(MARINE)
 
-for _ in range(NUM_EPISODES):
-    training = True
-    bot = TerranBot(training=training)
+for episode in range(NUM_EPISODES):
+    bot = TerranBot()
     result = sc2.run_game(sc2.maps.get("(2)RedshiftLE"), [
         Bot(Race.Terran, bot),
         Computer(Race.Protoss, Difficulty.Medium)
         ], realtime=False)
 
     if result == Result.Victory:
-        np.save(f'{TRAIN_DIR}/{int(time())}.npy', np.array(bot.states))
+        bot.remember(reward=1000, done=True)
+    else:
+        bot.remember(reward=-1000, done=True)
+
+    bot.dqn.save("training/terran-bot-dqn.h5")
 
     with open("results.log", "a") as log:
-        if training:
-            log.write(f"Training = {result}\n")
-        else:
-            log.write(f"Model = {result}\n")
+        log.write(f"episode: {episode + 1}/{NUM_EPISODES}, epsilon: {bot.dqn.epsilon:.2}, result: {result}\n")
