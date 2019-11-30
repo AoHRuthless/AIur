@@ -85,6 +85,7 @@ class TerranBot(sc2.BotAI):
             self.upgrade_cc: 1,
             self.expand: 4,
             self.scout: 1,
+            self.calldown_mules: 2,
         }
 
         self.actions = []
@@ -104,6 +105,13 @@ class TerranBot(sc2.BotAI):
             MARAUDER,
             MEDIVAC,
             HELLION
+        ]
+
+        self.tl_tags = []
+        self.techlab_research_options = [
+            RESEARCH_COMBATSHIELD, 
+            RESEARCH_CONCUSSIVESHELLS, 
+            BARRACKSTECHLABRESEARCH_STIMPACK
         ]
 
     async def on_step(self, iteration):
@@ -127,13 +135,31 @@ class TerranBot(sc2.BotAI):
                 await self.do(unit.attack(target))
             return
 
-        # for cc in self.townhalls:
-        #     enemies = self.known_enemy_units.closer_than(25.0, cc)
-        #     if len(enemies) > 0:
-        #         target = random.choice(enemies)
-        #         for unit in self.marines | self.units(MARAUDER):
-        #             await self.do(unit.attack(target))
-        #         break
+        ready_techlabs = self.units(BARRACKSTECHLAB).ready
+        if len(ready_techlabs) != self.tl_tags:
+            self.tl_tags = []
+            for techlab in ready_techlabs:
+                self.tl_tags.append(techlab.tag)
+
+        if len(self.techlab_research_options) > 0:
+            for techlab in ready_techlabs:
+                try:
+                    to_research = random.choice(self.techlab_research_options)
+                    if self.can_afford(to_research):
+                        await self.do(techlab(to_research))
+                        self.techlab_research_options = \
+                        self.techlab_research_options.filter(lambda x: x != to_research)
+                except Exception as err:
+                    pass
+
+        for cc in self.townhalls:
+            enemies = self.known_enemy_units.closer_than(25.0, cc).filter(
+                lambda x: x.name.lower() not in ["scv", "drone", "probe"])
+            if len(enemies) > 0:
+                target = random.choice(enemies)
+                for unit in self.marines | self.units(MARAUDER):
+                    await self.do(unit.attack(target))
+                break
 
         self.action = self.make_action_selection()
 
@@ -196,9 +222,16 @@ class TerranBot(sc2.BotAI):
             await self.do(sd(MORPH_SUPPLYDEPOT_LOWER))
 
     async def upgrade_cc(self):
-        while self.barracks.ready.exists and self.can_afford(ORBITALCOMMAND):
-            for cc in self.units(COMMANDCENTER).idle:
+        for cc in self.units(COMMANDCENTER).idle:
+            if self.barracks.ready.exists and self.can_afford(ORBITALCOMMAND):
                 await self.do(cc(UPGRADETOORBITAL_ORBITALCOMMAND))
+
+    async def calldown_mules(self):
+        for oc in self.units(ORBITALCOMMAND).filter(lambda x: x.energy >= 50):
+            mfs = self.state.mineral_field.closer_than(10, oc)
+            if mfs:
+                mf = max(mfs, key=lambda x: x.mineral_contents)
+                await self.do(oc(CALLDOWNMULE_CALLDOWNMULE, mf))
 
     async def expand(self):
         try:
@@ -209,7 +242,7 @@ class TerranBot(sc2.BotAI):
 
     async def manage_refineries(self):
         for cc in self.units(COMMANDCENTER).ready:
-            vgs = self.state.vespene_geyser.closer_than(20.0, cc)
+            vgs = self.state.vespene_geyser.closer_than(16.0, cc)
             for vg in vgs:
                 if not self.can_afford(REFINERY):
                     break
@@ -222,7 +255,7 @@ class TerranBot(sc2.BotAI):
     async def adjust_refinery_assignment(self):
         r = self.units(REFINERY).ready.random
         if r.assigned_harvesters < r.ideal_harvesters:
-            w = self.workers.closer_than(20.0, r)
+            w = self.workers.closer_than(16.0, r)
             if w.exists:
                 await self.do(w.random.gather(r))
 
@@ -295,25 +328,25 @@ class TerranBot(sc2.BotAI):
             await self.build(STARPORT, near=depot)
 
     async def train_marines(self):
-        for rax in self.barracks.ready.noqueue:
+        for rax in self.barracks.ready.filter(lambda x: x.add_on_tag not in self.tl_tags):
             if not self.can_afford(MARINE):
                 break
             await self.do(rax.train(MARINE))
 
     async def train_marauders(self):
-        for rax in self.barracks.ready.noqueue:
+        for rax in self.barracks.ready.filter(lambda x: x.add_on_tag in self.tl_tags):
             if not self.can_afford(MARAUDER):
                 break
             await self.do(rax.train(MARAUDER))
 
     async def train_hellions(self):
-        for f in self.units(FACTORY).ready.noqueue:
+        for f in self.units(FACTORY).ready:
             if not self.can_afford(HELLION):
                 break
             await self.do(f.train(HELLION))
 
     async def train_medivacs(self):
-        for sp in self.units(STARPORT).ready.noqueue:
+        for sp in self.units(STARPORT).ready:
             if not self.can_afford(MEDIVAC):
                 break
             await self.do(sp.train(MEDIVAC))
@@ -371,7 +404,7 @@ class TerranBot(sc2.BotAI):
         line_scalar = 40
         minerals = min(1.0, self.minerals / 1200)
         vespene = min(1.0, self.vespene / 1200)
-        pop_space = min(1.0, self.supply_left / min(1.0, self.supply_cap))
+        pop_space = min(1.0, self.supply_left / max(1.0, self.supply_cap))
         supply_usage = self.supply_cap / 200
         military = (self.supply_cap - self.supply_left - self.workers.amount) \
         / max(1, self.supply_cap - self.supply_left)
