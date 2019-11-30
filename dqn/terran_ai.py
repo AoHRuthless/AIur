@@ -69,7 +69,7 @@ class TerranBot(sc2.BotAI):
             self.no_op: 1,
             self.standby: 1,
             self.attack: 3,
-            self.manage_supply: 5,
+            self.manage_supply: 4,
             # self.adjust_refinery_assignment: 1,
             self.manage_refineries: 1,
             self.manage_barracks: 4,
@@ -78,12 +78,12 @@ class TerranBot(sc2.BotAI):
             # self.manage_factories: 1,
             # self.manage_starports: 1,
             self.train_workers: 3,
-            self.train_marines: 6,
-            self.train_marauders: 3,
+            self.train_marines: 8,
+            self.train_marauders: 4,
             # self.train_hellions: 1,
             # self.train_medivacs: 1,
             self.upgrade_cc: 1,
-            self.expand: 3,
+            self.expand: 4,
             self.scout: 1,
         }
 
@@ -295,25 +295,25 @@ class TerranBot(sc2.BotAI):
             await self.build(STARPORT, near=depot)
 
     async def train_marines(self):
-        for rax in self.barracks.ready:
+        for rax in self.barracks.ready.noqueue:
             if not self.can_afford(MARINE):
                 break
             await self.do(rax.train(MARINE))
 
     async def train_marauders(self):
-        for rax in self.barracks.ready:
+        for rax in self.barracks.ready.noqueue:
             if not self.can_afford(MARAUDER):
                 break
             await self.do(rax.train(MARAUDER))
 
     async def train_hellions(self):
-        for f in self.units(FACTORY).ready:
+        for f in self.units(FACTORY).ready.noqueue:
             if not self.can_afford(HELLION):
                 break
             await self.do(f.train(HELLION))
 
     async def train_medivacs(self):
-        for sp in self.units(STARPORT).ready:
+        for sp in self.units(STARPORT).ready.noqueue:
             if not self.can_afford(MEDIVAC):
                 break
             await self.do(sp.train(MEDIVAC))
