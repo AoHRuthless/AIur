@@ -92,28 +92,26 @@ class TerranBot(sc2.BotAI):
             for _ in range(weight):
                 self.actions.append(action_fn)
 
-        print(self.actions)
-
         self.curr_state = None
         self.num_actions = len(self.actions)
         self.dqn = DQNModel(self.actions, eps=epsilon)
+
         self.iteration = 0
 
-        # <dict> [UnitId: int] specifying military composition.
-        self.military_distribution = {
-            MARINE: 15,
-            MARAUDER: 6,
-            MEDIVAC: 1,
-            HELLION: 5
-        }
-
-        self.expansion_pending = False
+        # <list> [UnitId] specifying military composition.
+        self.military_distribution = [
+            MARINE,
+            MARAUDER,
+            MEDIVAC,
+            HELLION
+        ]
 
     async def on_step(self, iteration):
         self.seconds_elapsed = self.state.game_loop / TIME_SCALAR
         self.minutes_elapsed = self.seconds_elapsed / SECONDS_PER_MIN
         self.attack_waves = set()
         self.iteration += 1
+        self.num_troops_per_wave = 14 + self.minutes_elapsed
 
         if self.curr_state is not None:
             self.prev_state = self.curr_state
@@ -324,18 +322,22 @@ class TerranBot(sc2.BotAI):
         """
         Prepares an attack wave when ready.
         """
-
-        attack_wave = None
+        total = 0
         for unit in self.military_distribution:
-            amount = self.military_distribution[unit]
             units = self.units(unit)
+            total += units.idle.amount
 
-            if units.idle.amount >= amount:
+        if total >= self.num_troops_per_wave:
+            attack_wave = None
+
+            for unit in self.military_distribution:
+                units = self.units(unit)
+
                 if attack_wave is None:
                     attack_wave = ControlGroup(units.idle)
                 else:
                     attack_wave.add_units(units.idle)
-        if attack_wave is not None:
+
             self.attack_waves.add(attack_wave)
 
     #### VISUALIZATION ####
