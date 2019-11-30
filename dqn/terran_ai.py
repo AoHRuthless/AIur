@@ -84,10 +84,12 @@ class TerranBot(sc2.BotAI):
             # self.train_medivacs,
             self.upgrade_cc,
             self.expand,
+            self.scout,
         ]
 
         if weights is None:
-            weights = [1, 1, 3, 3, 1, 4, 1, 1, 3, 7, 2, 1, 4]
+            weights = [1, 1, 3, 5, 1, 4, 1, 1, 3, 7, 3, 1, 3, 1]
+            # weights = [1, 1, 3, 4, 1, 1, 4, 1, 1, 1, 1, 5, 9, 3, 1, 1, 1, 3, 1]
 
         self.actions = []
         if len(weights) == len(actions_unweighted):
@@ -99,6 +101,16 @@ class TerranBot(sc2.BotAI):
         self.num_actions = len(self.actions)
         self.dqn = DQNModel(self.actions, eps=epsilon)
         self.iteration = 0
+
+        # <dict> [UnitId: int] specifying military composition.
+        self.military_distribution = {
+            MARINE: 15,
+            MARAUDER: 6,
+            MEDIVAC: 1,
+            HELLION: 5
+        }
+
+        self.expansion_pending = False
 
     async def on_step(self, iteration):
         self.seconds_elapsed = self.state.game_loop / TIME_SCALAR
@@ -120,17 +132,18 @@ class TerranBot(sc2.BotAI):
                 await self.do(unit.attack(target))
             return
 
-        military = {
-            MARINE: 15,
-            MARAUDER: 6,
-            MEDIVAC: 1,
-            HELLION: 5
-        }
+        # for cc in self.townhalls:
+        #     enemies = self.known_enemy_units.closer_than(25.0, cc)
+        #     if len(enemies) > 0:
+        #         target = random.choice(enemies)
+        #         for unit in self.marines | self.units(MARAUDER):
+        #             await self.do(unit.attack(target))
+        #         break
 
         self.action = self.make_action_selection()
 
         # print(f"action chosen == {self.action}")
-        self.prepare_attack(military)
+        self.prepare_attack()
         # if len(list(self.attack_waves)) > 0 and self.units(MEDIVAC).idle.amount > 0:
         #     alive_units = list(self.attack_waves)[0].select_units(self.units)
         #     for med in self.units(MEDIVAC).idle:
@@ -138,14 +151,13 @@ class TerranBot(sc2.BotAI):
 
         await self.distribute_workers()
         await self.lower_depots()
-        # await self.scout()
         await self.take_action()
 
     async def no_op(self):
         pass
 
     async def standby(self):
-        self.next_actionable = self.seconds_elapsed + random.randrange(1, 30)
+        self.next_actionable = self.seconds_elapsed + random.randrange(1, 37)
 
     async def take_action(self):
         if self.seconds_elapsed <= self.next_actionable:
@@ -189,7 +201,7 @@ class TerranBot(sc2.BotAI):
             await self.do(sd(MORPH_SUPPLYDEPOT_LOWER))
 
     async def upgrade_cc(self):
-        if self.barracks.ready.exists and self.can_afford(ORBITALCOMMAND):
+        while self.barracks.ready.exists and self.can_afford(ORBITALCOMMAND):
             for cc in self.units(COMMANDCENTER).idle:
                 await self.do(cc(UPGRADETOORBITAL_ORBITALCOMMAND))
 
@@ -213,22 +225,21 @@ class TerranBot(sc2.BotAI):
                     await self.do(worker.build(REFINERY, vg))
 
     async def adjust_refinery_assignment(self):
-        for r in self.units(REFINERY):
-            if r.assigned_harvesters < r.ideal_harvesters:
-                w = self.workers.closer_than(20.0, r)
-                if w.exists:
-                    await self.do(w.random.gather(r))
+        r = self.units(REFINERY).ready.random
+        if r.assigned_harvesters < r.ideal_harvesters:
+            w = self.workers.closer_than(20.0, r)
+            if w.exists:
+                await self.do(w.random.gather(r))
 
     #### MILITARY ####
     ##################
 
-    async def attack(self):
+    async def attack(self, target=None):
         """
         Sends any attack group out to target. No micro is done on the army 
         dispatch.
         """
 
-        target = None 
         if self.action == 2:
             if len(self.known_enemy_structures) > 0:
                 target = random.choice(self.known_enemy_structures).position
@@ -237,10 +248,7 @@ class TerranBot(sc2.BotAI):
                 target = self.known_enemy_units.closest_to(random.choice(self.townhalls)).position
         elif self.action == 4:
             target = self.enemy_start_locations[0].position
-        else:
-            return
-
-        if target is None:
+        elif target is None:
             return
 
         for wave in list(self.attack_waves):
@@ -275,7 +283,7 @@ class TerranBot(sc2.BotAI):
         if not self.barracks.ready.exists:
             return
 
-        if self.can_afford(FACTORY) and self.units(FACTORY).amount < 3:
+        if self.can_afford(FACTORY) and self.units(FACTORY).amount < 2:
             depot = self.depots.ready.random
             await self.build(FACTORY, near=depot)
 
@@ -287,7 +295,7 @@ class TerranBot(sc2.BotAI):
         if not self.units(FACTORY).ready.exists:
             return
 
-        if self.can_afford(STARPORT) and self.units(STARPORT).amount < 3:
+        if self.can_afford(STARPORT) and self.units(STARPORT).amount < 2:
             depot = self.depots.ready.random
             await self.build(STARPORT, near=depot)
 
@@ -315,17 +323,14 @@ class TerranBot(sc2.BotAI):
                 break
             await self.do(sp.train(MEDIVAC))
 
-    def prepare_attack(self, max_per_group):
+    def prepare_attack(self):
         """
         Prepares an attack wave when ready.
-
-        :param max_per_group: <dict> [UnitId: int] specifying military 
-        composition.
         """
 
         attack_wave = None
-        for unit in max_per_group:
-            amount = max_per_group[unit]
+        for unit in self.military_distribution:
+            amount = self.military_distribution[unit]
             units = self.units(unit)
 
             if units.idle.amount >= amount:
@@ -367,7 +372,7 @@ class TerranBot(sc2.BotAI):
         line_scalar = 40
         minerals = min(1.0, self.minerals / 1200)
         vespene = min(1.0, self.vespene / 1200)
-        pop_space = min(1.0, self.supply_left / self.supply_cap)
+        pop_space = min(1.0, self.supply_left / min(1.0, self.supply_cap))
         supply_usage = self.supply_cap / 200
         military = (self.supply_cap - self.supply_left - self.workers.amount) \
         / max(1, self.supply_cap - self.supply_left)
@@ -383,8 +388,6 @@ class TerranBot(sc2.BotAI):
     ##################
 
     async def scout(self):
-        if self.seconds_elapsed % 2 == 0 or self.minutes_elapsed > 5:
-            return
         expand_distances = {}
 
         for el in self.expansion_locations:
@@ -462,7 +465,7 @@ try:
         bot = TerranBot(epsilon=epsilon)
         result = sc2.run_game(sc2.maps.get("(2)RedshiftLE"), [
             Bot(Race.Terran, bot),
-            Computer(Race.Protoss, Difficulty.Medium)
+            Computer(Race.Protoss, Difficulty.MediumHard)
             ], realtime=False)
 
         if result == Result.Victory:
