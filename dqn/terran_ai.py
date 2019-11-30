@@ -61,41 +61,38 @@ UNIT_REPRESENTATION = {
 
 class TerranBot(sc2.BotAI):
 
-    def __init__(self, epsilon=1.0, weights=None):
+    def __init__(self, epsilon=1.0):
         self.next_actionable = 0
         self.scout_locations = {}
 
-        actions_unweighted = [
-            self.no_op,
-            self.standby,
-            self.attack,
-            self.manage_supply,
-            # self.adjust_refinery_assignment,
-            self.manage_refineries,
-            self.manage_barracks,
-            self.manage_barracks_tech_labs,
-            self.manage_barracks_reactors,
-            # self.manage_factories,
-            # self.manage_starports,
-            self.train_workers,
-            self.train_marines,
-            self.train_marauders,
-            # self.train_hellions,
-            # self.train_medivacs,
-            self.upgrade_cc,
-            self.expand,
-            self.scout,
-        ]
-
-        if weights is None:
-            weights = [1, 1, 3, 5, 1, 4, 1, 1, 3, 7, 3, 1, 3, 1]
-            # weights = [1, 1, 3, 4, 1, 1, 4, 1, 1, 1, 1, 5, 9, 3, 1, 1, 1, 3, 1]
+        weighted_actions = {
+            self.no_op: 1,
+            self.standby: 1,
+            self.attack: 3,
+            self.manage_supply: 5,
+            # self.adjust_refinery_assignment: 1,
+            self.manage_refineries: 1,
+            self.manage_barracks: 4,
+            self.manage_barracks_tech_labs: 1,
+            self.manage_barracks_reactors: 1,
+            # self.manage_factories: 1,
+            # self.manage_starports: 1,
+            self.train_workers: 3,
+            self.train_marines: 6,
+            self.train_marauders: 3,
+            # self.train_hellions: 1,
+            # self.train_medivacs: 1,
+            self.upgrade_cc: 1,
+            self.expand: 3,
+            self.scout: 1,
+        }
 
         self.actions = []
-        if len(weights) == len(actions_unweighted):
-            for idx, w in enumerate(weights):
-                for _ in range(w):
-                    self.actions.append(actions_unweighted[idx])
+        for action_fn, weight in weighted_actions.items():
+            for _ in range(weight):
+                self.actions.append(action_fn)
+
+        print(self.actions)
 
         self.curr_state = None
         self.num_actions = len(self.actions)
