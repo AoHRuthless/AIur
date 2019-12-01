@@ -46,8 +46,8 @@ class DQNModel:
 
         # fully connected dense layer
         self.model.add(Flatten())
-        self.model.add(Dense(512, activation='relu'))
-        self.model.add(Dropout(0.5))
+        self.model.add(Dense(128, activation='relu'))
+        self.model.add(Dropout(0.2))
 
         # output layer
         self.model.add(Dense(self.num_actions, activation='softmax'))
