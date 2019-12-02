@@ -9,6 +9,8 @@ import random
 
 from collections import deque
 
+LOAD = True
+
 class DQNModel:
     def __init__(self, action_space, gamma=0.99, eps=1.0, eps_min=0.01, eps_decay=0.9998):
         self.memory = deque(maxlen=2000)
@@ -21,6 +23,9 @@ class DQNModel:
         self.num_actions = len(action_space)
 
         self.build_neural_network_model()
+
+        if LOAD:
+            self.load("training/terran-bot-dqn.h5")
         
     def build_neural_network_model(self):
         self.model = Sequential()
