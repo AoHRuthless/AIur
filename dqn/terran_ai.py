@@ -16,48 +16,10 @@ from time import time
 
 TIME_SCALAR = 22.4
 SECONDS_PER_MIN = 60
-NUM_EPISODES = 100
+NUM_EPISODES = 500
 TRAIN_DIR = "training"
 VISUALIZE = False
-REPLAY_BATCH_SIZE = 32
-
-# note that colors are in BGR representation
-UNIT_REPRESENTATION = {
-    COMMANDCENTER: [12, (0, 255, 0), "commandcenter"],
-    NEXUS:         [12, (0, 255, 0), "nexus"],
-    HATCHERY:      [12, (0, 255, 0), "hatchery"],
-
-    SUPPLYDEPOT:        [3, (55, 120, 0), "supplydepot"],
-    SUPPLYDEPOTLOWERED: [3, (55, 120, 0), "supplydepotlowered"],
-    PYLON:              [3, (55, 120, 0), "pylon"],
-    OVERSEER:           [3, (55, 120, 0), "overseer"],
-    OVERLORD:           [3, (55, 120, 0), "overlord"],
-
-    REFINERY:    [3, (100, 100, 100), "refinery"],
-    ASSIMILATOR: [3, (100, 100, 100), "assimilator"],
-
-    BARRACKS: [5, (200, 40, 0), "barracks"],
-    FACTORY: [5, (175, 45, 40), "factory"],
-    STARPORT: [5, (128, 32, 32), "starport"],
-
-    GATEWAY: [5, (200, 40, 0), "gateway"],
-    CYBERNETICSCORE: [5, (175, 45, 40), "cyberneticscore"],
-    ROBOTICSFACILITY: [5, (128, 32, 32), "roboticsfacility"],
-
-    MARINE: [1, (0, 0, 240), "marine"],
-    MARAUDER: [1, (0, 75, 215), "marauder"],
-    HELLION: [1, (0, 50, 149), "hellion"],
-    MEDIVAC: [1, (0, 128, 124), "medivac"],
-
-    ZEALOT: [1, (0, 0, 240), "zealot"],
-    ZERGLING: [1, (0, 0, 240), "zergling"],
-    STALKER: [1, (0, 75, 215), "stalker"],
-    OBSERVER: [1, (65, 60, 30), "observer"],
-
-    SCV:   [1, (34, 237, 200), "scv"],
-    PROBE: [1, (34, 237, 200), "probe"],
-    DRONE: [1, (34, 237, 200), "drone"]
-}
+REPLAY_BATCH_SIZE = 64
 
 class TerranBot(sc2.BotAI):
 
@@ -69,19 +31,19 @@ class TerranBot(sc2.BotAI):
             self.no_op: 1,
             self.standby: 1,
             self.attack: 3,
-            self.manage_supply: 4,
-            # self.adjust_refinery_assignment: 1,
+            self.manage_supply: 5,
+            self.adjust_refinery_assignment: 1,
             self.manage_refineries: 1,
-            self.manage_barracks: 4,
+            self.manage_barracks: 3,
             self.manage_barracks_tech_labs: 1,
             self.manage_barracks_reactors: 1,
-            # self.manage_factories: 1,
-            # self.manage_starports: 1,
+            self.manage_factories: 1,
+            self.manage_starports: 1,
             self.train_workers: 3,
-            self.train_marines: 8,
+            self.train_marines: 7,
             self.train_marauders: 4,
-            # self.train_hellions: 1,
-            # self.train_medivacs: 1,
+            self.train_hellions: 1,
+            self.train_medivacs: 1,
             self.upgrade_cc: 1,
             self.expand: 4,
             self.scout: 1,
@@ -103,7 +65,6 @@ class TerranBot(sc2.BotAI):
         self.military_distribution = [
             MARINE,
             MARAUDER,
-            MEDIVAC,
             HELLION
         ]
 
@@ -119,7 +80,7 @@ class TerranBot(sc2.BotAI):
         self.minutes_elapsed = self.seconds_elapsed / SECONDS_PER_MIN
         self.attack_waves = set()
         self.iteration += 1
-        self.num_troops_per_wave = 14 + self.minutes_elapsed
+        self.num_troops_per_wave = min(14 + self.minutes_elapsed, 30)
 
         if self.curr_state is not None:
             self.prev_state = self.curr_state
@@ -131,7 +92,7 @@ class TerranBot(sc2.BotAI):
 
         if not self.townhalls.exists:
             target = self.known_enemy_structures.random_or(self.enemy_start_locations[0]).position
-            for unit in self.workers | self.marines | self.units(MARAUDER):
+            for unit in self.workers | self.military_units:
                 await self.do(unit.attack(target))
             return
 
@@ -157,7 +118,7 @@ class TerranBot(sc2.BotAI):
                 lambda x: x.name.lower() not in ["scv", "drone", "probe"])
             if len(enemies) > 0:
                 target = random.choice(enemies)
-                for unit in self.marines | self.units(MARAUDER):
+                for unit in self.military_units:
                     await self.do(unit.attack(target))
                 break
 
@@ -165,10 +126,10 @@ class TerranBot(sc2.BotAI):
 
         # print(f"action chosen == {self.action}")
         self.prepare_attack()
-        # if len(list(self.attack_waves)) > 0 and self.units(MEDIVAC).idle.amount > 0:
-        #     alive_units = list(self.attack_waves)[0].select_units(self.units)
-        #     for med in self.units(MEDIVAC).idle:
-        #         await self.do(med.move(alive_units.first.position))
+        if len(list(self.attack_waves)) > 0 and self.units(MEDIVAC).idle.amount > 0:
+            alive_units = list(self.attack_waves)[0].select_units(self.units)
+            for med in self.units(MEDIVAC).idle:
+                await self.do(med.attack(alive_units.first.position))
 
         await self.distribute_workers()
         await self.lower_depots()
@@ -207,8 +168,9 @@ class TerranBot(sc2.BotAI):
         if not self.can_afford(SCV):
             return
 
-        for cc in self.townhalls.ready.noqueue:
-            await self.do(cc.train(SCV))
+        for cc in self.townhalls.ready.filter(lambda x: len(x.orders) < 3):
+            if len(self.workers) < 18 * len(self.townhalls):
+                await self.do(cc.train(SCV))
 
     async def manage_supply(self):
         if self.can_afford(SUPPLYDEPOT) \
@@ -262,22 +224,18 @@ class TerranBot(sc2.BotAI):
     #### MILITARY ####
     ##################
 
-    async def attack(self, target=None):
+    async def attack(self):
         """
         Sends any attack group out to target. No micro is done on the army 
         dispatch.
         """
 
-        if self.action == 2:
-            if len(self.known_enemy_structures) > 0:
-                target = random.choice(self.known_enemy_structures).position
-        elif self.action == 3:
-            if len(self.known_enemy_units) > 0:
-                target = self.known_enemy_units.closest_to(random.choice(self.townhalls)).position
-        elif self.action == 4:
+        if len(self.known_enemy_structures) > 0:
+            target = random.choice(self.known_enemy_structures).position
+        elif len(self.known_enemy_units) > 0:
+            target = self.known_enemy_units.closest_to(random.choice(self.townhalls)).position
+        else:
             target = self.enemy_start_locations[0].position
-        elif target is None:
-            return
 
         for wave in list(self.attack_waves):
             alive_units = wave.select_units(self.units)
@@ -291,7 +249,7 @@ class TerranBot(sc2.BotAI):
         if not self.depots.ready.exists:
             return
 
-        if self.can_afford(BARRACKS) and self.barracks.amount < 5:
+        if self.can_afford(BARRACKS) and self.barracks.amount < 1 + self.minutes_elapsed:
             depot = self.depots.ready.random
             await self.build(BARRACKS, near=depot)
 
@@ -311,7 +269,7 @@ class TerranBot(sc2.BotAI):
         if not self.barracks.ready.exists:
             return
 
-        if self.can_afford(FACTORY) and self.units(FACTORY).amount < 2:
+        if self.can_afford(FACTORY) and self.units(FACTORY).amount < 3:
             depot = self.depots.ready.random
             await self.build(FACTORY, near=depot)
 
@@ -328,25 +286,25 @@ class TerranBot(sc2.BotAI):
             await self.build(STARPORT, near=depot)
 
     async def train_marines(self):
-        for rax in self.barracks.ready.filter(lambda x: x.add_on_tag not in self.tl_tags):
+        for rax in self.barracks.ready.filter(lambda x: x.add_on_tag not in self.tl_tags and len(x.orders) < 3):
             if not self.can_afford(MARINE):
                 break
             await self.do(rax.train(MARINE))
 
     async def train_marauders(self):
-        for rax in self.barracks.ready.filter(lambda x: x.add_on_tag in self.tl_tags):
+        for rax in self.barracks.ready.filter(lambda x: x.add_on_tag in self.tl_tags and len(x.orders) < 3):
             if not self.can_afford(MARAUDER):
                 break
             await self.do(rax.train(MARAUDER))
 
     async def train_hellions(self):
-        for f in self.units(FACTORY).ready:
+        for f in self.units(FACTORY).ready.filter(lambda x: len(x.orders) < 3):
             if not self.can_afford(HELLION):
                 break
             await self.do(f.train(HELLION))
 
     async def train_medivacs(self):
-        for sp in self.units(STARPORT).ready:
+        for sp in self.units(STARPORT).ready.filter(lambda x: len(x.orders) < 3):
             if not self.can_afford(MEDIVAC):
                 break
             await self.do(sp.train(MEDIVAC))
@@ -486,10 +444,26 @@ class TerranBot(sc2.BotAI):
     @property
     def barracks(self):
         return self.units(BARRACKS)
+
+    @property
+    def military_units(self):
+        return self.marines | self.marauders | self.medivacs | self.hellions
     
     @property
     def marines(self):
         return self.units(MARINE)
+
+    @property
+    def marauders(self):
+        return self.units(MARAUDER)
+
+    @property
+    def medivacs(self):
+        return self.units(MEDIVAC)
+
+    @property
+    def hellions(self):
+        return self.units(HELLION)
 
 epsilon = 1.0
 try:
