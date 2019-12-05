@@ -22,52 +22,55 @@ class DQNModel:
         self.actions = action_space
         self.num_actions = len(action_space)
 
-        self.build_neural_network_model()
+        self.model = self.build_neural_network_model()
+        self.target_model = self.build_neural_network_model(print_summary=False)
 
         if LOAD:
             self.load("training/terran-dqn.h5")
         
-    def build_neural_network_model(self):
-        self.model = Sequential()
+    def build_neural_network_model(self, print_summary=True):
+        model = Sequential()
 
         # hidden conv net layers
         num_layers = [32, 64, 128]
         specify_shape = True
         for num_layer in num_layers:
             if specify_shape:
-                self.model.add(Conv2D(num_layer, 
-                                      (3, 3), 
-                                      padding='same', 
-                                      input_shape=(184, 152, 3), 
-                                      activation='relu'))
+                model.add(Conv2D(num_layer, 
+                                 (3, 3), 
+                                 padding='same', 
+                                 input_shape=(184, 152, 3), 
+                                 activation='relu'))
                 specify_shape = False
             else:
-                self.model.add(
+                model.add(
                     Conv2D(num_layer, (3, 3), padding='same', activation='relu'))
 
-            self.model.add(Conv2D(num_layer, (3, 3), activation='relu'))
-            self.model.add(MaxPooling2D(pool_size=(2, 2)))
-            self.model.add(Dropout(0.2))
+            model.add(Conv2D(num_layer, (3, 3), activation='relu'))
+            model.add(MaxPooling2D(pool_size=(2, 2)))
+            model.add(Dropout(0.2))
 
         # fully connected dense layer
-        self.model.add(Flatten())
-        self.model.add(Dense(128, activation='relu'))
-        self.model.add(Dropout(0.2))
+        model.add(Flatten())
+        model.add(Dense(128, activation='relu'))
+        model.add(Dropout(0.2))
 
         # output layer
-        self.model.add(Dense(self.num_actions, activation='softmax'))
+        model.add(Dense(self.num_actions, activation='softmax'))
 
         # compilation settings
         self.alpha = 1e-4
         opt = keras.optimizers.adam(lr=self.alpha, decay=1e-6)
 
-        self.model.compile(loss='categorical_crossentropy',
+        model.compile(loss='categorical_crossentropy',
                            optimizer=opt,
                            metrics=['accuracy'])
-        self.model.summary()
+        if print_summary:
+            model.summary()
 
         # log everything via tensorboard
         self.tensorboard = TensorBoard(log_dir="log")
+        return model
 
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
@@ -86,13 +89,13 @@ class DQNModel:
             minibatch = random.sample(self.memory, batch_size)
 
         for state, action, reward, next_state, done in minibatch:
-            target = reward
-            if not done:
-                target = (reward + self.gamma *
-                          np.amax(self.model.predict(next_state)))
-            target_f = self.model.predict(state)
-            target_f[0][action] = target
-            self.model.fit(state, target_f, epochs=1, verbose=0)
+            target = self.target_model.predict(state)
+            if done:
+                target[0][action] = reward
+            else:
+                q_next = max(self.target_model.predict(next_state)[0])
+                target[0][action] = reward + q_next * self.gamma
+            self.model.fit(state, target, epochs=1, verbose=0)
 
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
@@ -102,3 +105,10 @@ class DQNModel:
 
     def save(self, name):
         self.model.save_weights(name)
+
+    def train_target_model(self):
+        weights = self.model.get_weights()
+        target_weights = self.target_model.get_weights()
+        for i in range(len(target_weights)):
+            target_weights[i] = weights[i]
+        self.target_model.set_weights(target_weights)
