@@ -16,16 +16,18 @@ from time import time
 
 TIME_SCALAR = 22.4
 SECONDS_PER_MIN = 60
-NUM_EPISODES = 500
+NUM_EPISODES = 1000
 TRAIN_DIR = "training"
 VISUALIZE = False
-REPLAY_BATCH_SIZE = 64
+REPLAY_BATCH_SIZE = 80
+UPDATE_TARGET_FREQ = 1000
 
 class TerranBot(sc2.BotAI):
 
     def __init__(self, epsilon=1.0):
         self.next_actionable = 0
         self.scout_locations = {}
+        self.rewards = []
 
         weighted_actions = {
             self.no_op: 1,
@@ -87,6 +89,8 @@ class TerranBot(sc2.BotAI):
             self.remember()
             if self.iteration % REPLAY_BATCH_SIZE == 0:
                 self.dqn.replay(REPLAY_BATCH_SIZE)
+            if self.iteration % UPDATE_TARGET_FREQ == 0:
+                self.dqn.train_target_model()
 
         await self.visualize()
 
@@ -157,9 +161,9 @@ class TerranBot(sc2.BotAI):
         return self.dqn.choose_action(self.curr_state)
 
     def remember(self, reward=None, done=False):
-        if not reward:
-            reward = self.state.score.score
-        self.dqn.remember(self.prev_state, self.action, reward, self.curr_state, done)
+        reward_value = reward if reward else (self.state.score.score / (200 * self.seconds_elapsed))
+        self.rewards.append(reward_value)
+        self.dqn.remember(self.prev_state, self.action, reward_value, self.curr_state, done)
 
     #### WORKERS ####
     #################
@@ -466,6 +470,7 @@ class TerranBot(sc2.BotAI):
         return self.units(HELLION)
 
 epsilon = 1.0
+gamma = 0.99
 try:
     for episode in range(NUM_EPISODES):
         bot = TerranBot(epsilon=epsilon)
@@ -479,10 +484,14 @@ try:
         else:
             bot.remember(reward=-1000, done=True)
 
-        bot.dqn.save(f"{TRAIN_DIR}/terran-bot-dqn.h5")
+        reward = 0
+        for idx, r in enumerate(reversed(bot.rewards)):
+            reward += gamma**idx + r
+
+        bot.dqn.save(f"{TRAIN_DIR}/terran-dqn.h5")
         epsilon = bot.dqn.epsilon
 
         with open("results.log", "a") as log:
-            log.write(f"episode: {episode + 1}/{NUM_EPISODES}, epsilon: {epsilon:.2}, result: {result}\n")
+            log.write(f"episode: {episode + 1}/{NUM_EPISODES}, epsilon: {epsilon:.3}, reward: {reward:.4f}, result: {result}\n")
 except KeyboardInterrupt as err:
     pass
