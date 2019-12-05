@@ -13,7 +13,7 @@ LOAD = True
 
 class DQNModel:
     def __init__(self, action_space, gamma=0.99, eps=1.0, eps_min=0.01, eps_decay=0.9998):
-        self.memory = deque(maxlen=2000)
+        self.memory = deque(maxlen=100000)
         self.gamma = gamma
         self.epsilon = eps
         self.epsilon_min = eps_min
@@ -25,7 +25,7 @@ class DQNModel:
         self.build_neural_network_model()
 
         if LOAD:
-            self.load("training/terran-bot-dqn.h5")
+            self.load("training/terran-dqn.h5")
         
     def build_neural_network_model(self):
         self.model = Sequential()
