@@ -7,6 +7,8 @@ plt.rcParams['figure.figsize'] = [12, 4]
 def rolling_average(data, *, window_size):
     """Smoothen the 1-d data array using a rollin average.
 
+    Taken from DQN programming assignments
+
     Args:
         data: 1-d numpy.array
         window_size: size of the smoothing window
