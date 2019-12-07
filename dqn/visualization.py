@@ -4,6 +4,10 @@ import numpy as np
 plt.style.use('ggplot')
 plt.rcParams['figure.figsize'] = [12, 4]
 
+# 811/1000 for Medium
+# 575/1000 for Hard
+# 0/1000 for Insane
+
 def rolling_average(data, *, window_size):
     """Smoothen the 1-d data array using a rollin average.
 
@@ -23,16 +27,21 @@ def rolling_average(data, *, window_size):
     )
     return smooth_data[: -window_size + 1]
 
-with open("results-medium.log", 'r') as logfile:
+num_wins = 0
+with open("results-insane.log", 'r') as logfile:
     results = logfile.readlines()
     returns = np.zeros(len(results))
     for idx, result in enumerate(results):
-        reward = str.split(result, ', ')[2][8:]
+        record = str.split(result, ', ')
+        reward = record[2][8:]
         returns[idx] = float(reward)
+        if record[3][8:] == "Result.Victory\n":
+            num_wins += 1
 
-plt.plot(rolling_average(returns, window_size=4), zorder=2)
+print(num_wins)
+plt.plot(rolling_average(returns, window_size=40), zorder=2)
 plt.plot(returns, zorder=1)
 plt.xlabel("Starcraft II Episode")
 plt.ylabel("Returns")
-plt.title("Starcraft DQN Medium Difficulty Returns")
+plt.title("Starcraft DQN Insane Difficulty Returns")
 plt.show()
